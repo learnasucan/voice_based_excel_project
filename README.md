@@ -2,6 +2,33 @@
 
 Production-ready MVP for field-by-field voice-assisted structured data entry.
 
+
+## Features
+
+- Voice-based entry
+
+- Manual editable input
+
+- Auto extraction of name, amount, and location
+
+- Marathi/English support
+
+- Excel generation
+
+- Database storage
+
+
+## Tech Stack
+
+- Web application
+
+- Backend API
+
+- Database
+
+- Excel export
+
+
 ## Stack
 
 - Next.js + TypeScript + Tailwind
