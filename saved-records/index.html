@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Saved Records</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <h1>Saved Records</h1>
+        <p>Review, filter, edit, and delete saved rows.</p>
+      </header>
+
+      <section id="duplicate-warning" class="banner hidden" role="status" aria-live="polite"></section>
+
+      <section class="toolbar" aria-label="Search and filters">
+        <label class="field">
+          <span>Search</span>
+          <input id="search-input" type="search" placeholder="Search by name or note" />
+        </label>
+
+        <label class="field">
+          <span>Duplicate Filter</span>
+          <select id="duplicate-filter">
+            <option value="all">All records</option>
+            <option value="duplicate">Duplicates only</option>
+            <option value="unique">Unique only</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="summary" aria-label="Summary">
+        <div>
+          <span class="label">Record count</span>
+          <strong id="record-count">0</strong>
+        </div>
+        <div>
+          <span class="label">Filtered total</span>
+          <strong id="filtered-total">0</strong>
+        </div>
+        <div>
+          <span class="label">Overall total</span>
+          <strong id="overall-total">0</strong>
+        </div>
+      </section>
+
+      <section id="loading-state" class="state-card">Loading records...</section>
+      <section id="error-state" class="state-card hidden">
+        <p id="error-message">Something went wrong.</p>
+        <button id="retry-btn" type="button">Retry</button>
+      </section>
+      <section id="empty-state" class="state-card hidden">No records match your filters.</section>
+
+      <section id="table-state" class="table-wrap hidden">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th class="right">Amount</th>
+              <th>Note</th>
+              <th>Duplicate</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="records-body"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

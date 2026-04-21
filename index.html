@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Capture Wizard</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="wizard-shell" aria-live="polite">
+      <header class="wizard-header">
+        <p class="kicker">Worker C</p>
+        <h1>Guided Row Entry</h1>
+        <p class="subtitle">
+          Capture one field at a time, verify transcript visually, then accept before continuing.
+        </p>
+        <p id="speechMode" class="mode-badge"></p>
+      </header>
+
+      <nav aria-label="Entry progress" class="stepper-wrapper">
+        <ol id="stepper" class="stepper"></ol>
+      </nav>
+
+      <section id="wizardContent" class="wizard-content"></section>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

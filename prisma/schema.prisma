@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ContributionRow {
+  id                 String   @id @default(cuid())
+  serialNumber       Int      @unique
+  nameMr             String
+  nameEn             String
+  contributionAmount Int
+  placeMr            String
+  placeEn            String
+  nameMrKey          String
+  placeMrKey         String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([nameMrKey, contributionAmount, placeMrKey], name: "uniq_row_identity")
+  @@index([nameMr])
+  @@index([nameEn])
+  @@index([placeMr])
+  @@index([placeEn])
+}
