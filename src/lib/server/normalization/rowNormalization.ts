@@ -17,6 +17,9 @@ const DEVANAGARI_TO_ASCII = new Map<string, string>([
 const HALANT = "\u094D";
 const KSHA_CLUSTER = "\u0915\u094D\u0937";
 const GYA_CLUSTER = "\u091C\u094D\u091E";
+const ANUSVARA = "\u0902";
+const CHANDRABINDU = "\u0901";
+const VISARGA = "\u0903";
 
 const VOWELS: Record<string, string> = {
   "\u0905": "a",
@@ -80,9 +83,7 @@ const VOWEL_SIGNS: Record<string, string> = {
   "\u094B": "o",
   "\u094C": "au",
   "\u0943": "ri",
-  "\u0902": "m",
-  "\u0903": "h",
-  "\u0901": "n"
+  [VISARGA]: "h"
 };
 
 export const normalizeSpaces = (value: string): string => value.replace(/\s+/g, " ").trim();
@@ -155,6 +156,45 @@ const capitalizeWords = (value: string): string =>
     .map((token) => (token ? token[0].toUpperCase() + token.slice(1) : token))
     .join(" ");
 
+const LABIALS = new Set(["\u092A", "\u092B", "\u092C", "\u092D", "\u092E"]); // प फ ब भ म
+
+const transliterateAnusvara = (nextChar: string | undefined): string => {
+  if (!nextChar) {
+    return "n";
+  }
+
+  if (LABIALS.has(nextChar)) {
+    return "m";
+  }
+
+  return "n";
+};
+
+const dropTerminalSchwa = (value: string): string => {
+  return value
+    .split(" ")
+    .map((token) => {
+      if (token.length < 5) {
+        return token;
+      }
+
+      if (!token.endsWith("a")) {
+        return token;
+      }
+
+      if (token.endsWith("ya")) {
+        return token;
+      }
+
+      if (/(aa|ia|ua|ea|oa)$/.test(token)) {
+        return token;
+      }
+
+      return token.slice(0, -1);
+    })
+    .join(" ");
+};
+
 export const transliterateMarathiToEnglish = (input: string): string => {
   const source = cleanTranscriptText(input);
   if (!source) {
@@ -206,7 +246,18 @@ export const transliterateMarathiToEnglish = (input: string): string => {
         continue;
       }
 
+      if (next === ANUSVARA || next === CHANDRABINDU) {
+        result += `${consonant}a${transliterateAnusvara(source[i + 2])}`;
+        i += 1;
+        continue;
+      }
+
       result += `${consonant}a`;
+      continue;
+    }
+
+    if (char === ANUSVARA || char === CHANDRABINDU) {
+      result += transliterateAnusvara(source[i + 1]);
       continue;
     }
 
@@ -220,6 +271,8 @@ export const transliterateMarathiToEnglish = (input: string): string => {
   }
 
   return normalizeSpaces(
-    capitalizeWords(result.replace(/aa/g, "a").replace(/ii/g, "i").replace(/uu/g, "u"))
+    capitalizeWords(
+      dropTerminalSchwa(result.replace(/aa/g, "a").replace(/ii/g, "i").replace(/uu/g, "u"))
+    )
   );
 };
