@@ -133,7 +133,7 @@ export const VoiceFieldInput = ({
               setRequestingPermission(false);
             }
           }}
-          disabled={!speech.isSupported || processing || requestingPermission}
+          disabled={!speech.isMicrophoneSupported || processing || requestingPermission}
         >
           {requestingPermission ? "Requesting access..." : "Enable microphone access"}
         </Button>
@@ -159,7 +159,12 @@ export const VoiceFieldInput = ({
         </Button>
         {!speech.isSupported ? (
           <span className="text-xs text-amber-700">
-            Speech recognition is not supported in this browser.
+            Speech-to-text is not supported in this browser. Use Chrome or Edge for voice capture.
+          </span>
+        ) : null}
+        {!speech.isMicrophoneSupported ? (
+          <span className="text-xs text-amber-700">
+            Microphone access is unavailable on this page or device.
           </span>
         ) : null}
         {speech.permissionState === "denied" ? (

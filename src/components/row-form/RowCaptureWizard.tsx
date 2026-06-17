@@ -224,7 +224,9 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
     }
   };
 
-  const canSubmit = FIELD_CONFIGS.every((field) => accepted[field.key]);
+  const hasRequiredDraftFields = FIELD_CONFIGS.every((field) =>
+    draft[field.key].trim().length > 0
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -232,6 +234,12 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
     setDuplicateWarning(null);
 
     const contributionAmount = Number.parseInt(draft.contributionAmount, 10);
+
+    if (!hasRequiredDraftFields) {
+      setSaving(false);
+      setFormError("Complete all row fields before saving.");
+      return;
+    }
 
     if (!Number.isFinite(contributionAmount) || contributionAmount <= 0) {
       setSaving(false);
@@ -336,12 +344,26 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
                 setRequestingTopUpPermission(false);
               }
             }}
-            disabled={!topUpSpeech.isSupported || requestingTopUpPermission || topUpProcessing}
+            disabled={
+              !topUpSpeech.isMicrophoneSupported ||
+              requestingTopUpPermission ||
+              topUpProcessing
+            }
           >
             {requestingTopUpPermission ? "Requesting access..." : "Enable microphone access"}
           </Button>
         </div>
 
+        {!topUpSpeech.isSupported ? (
+          <p className="mt-2 text-xs text-amber-700">
+            Speech-to-text is not supported in this browser. Use Chrome or Edge for top-up voice.
+          </p>
+        ) : null}
+        {!topUpSpeech.isMicrophoneSupported ? (
+          <p className="mt-2 text-xs text-amber-700">
+            Microphone access is unavailable on this page or device.
+          </p>
+        ) : null}
         {topUpSpeech.isListening ? (
           <p className="mt-2 text-xs font-medium text-brand-700">Listening for full row...</p>
         ) : null}
@@ -459,7 +481,7 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
       ) : null}
 
       <div className="mt-4 flex gap-2">
-        <Button type="button" onClick={handleSave} disabled={!canSubmit || saving}>
+        <Button type="button" onClick={handleSave} disabled={saving}>
           {saving ? "Saving..." : "Save Row"}
         </Button>
       </div>

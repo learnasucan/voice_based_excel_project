@@ -1,27 +1,76 @@
-node_modules
-.next
-out
-dist
-coverage
-.cache/
-.idea/
-.npm/
-.pnpm-store/
-.vscode/
-.vercel/
-.turbo/
-*.log
+# macOS
 .DS_Store
+
+# Environment / secrets
 .env
-.env
-.env.local
-.env.*.local
+.env.*
 !.env.example
-prisma/dev.db
-prisma/dev.db-journal
-__pycache__
-*.pyc
-*.tsbuildinfo
+*.pem
+*.p12
+*.key
+*secret*
+*credentials*
+*service-account*
+
+# Logs
+*.log
 logs/
+
+# Temp/cache
 tmp/
 temp/
+.cache/
+
+# VS Code / JetBrains
+.vscode/
+.idea/
+
+# Node / Web
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+.npm/
+.pnpm-store/
+.turbo/
+.vercel/
+
+# Swift / Xcode
+DerivedData/
+build/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+Pods/
+Carthage/Build/
+.swiftpm/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Generated exports
+exports/
+generated/
+
+# TypeScript build cache
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Prisma local database
+prisma/dev.db
+prisma/dev.db-journal
+*.db
+*.db-journal

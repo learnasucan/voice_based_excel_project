@@ -125,6 +125,7 @@ export const useSpeechRecognition = ({
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
+  const [isMicrophoneSupported, setIsMicrophoneSupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [permissionState, setPermissionState] = useState<MicrophonePermissionState>("unknown");
 
@@ -152,6 +153,7 @@ export const useSpeechRecognition = ({
   useEffect(() => {
     const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     setIsSupported(Boolean(Recognition));
+    setIsMicrophoneSupported(Boolean(navigator.mediaDevices?.getUserMedia));
     void refreshPermissionState();
 
     const onFocus = () => {
@@ -247,6 +249,9 @@ export const useSpeechRecognition = ({
 
   const startListening = useCallback(() => {
     if (!recognitionRef.current || !isSupported) {
+      setError(
+        "Speech-to-text is not available in this browser. Open the app in Chrome or Edge and allow microphone access."
+      );
       return;
     }
 
@@ -276,6 +281,7 @@ export const useSpeechRecognition = ({
   return useMemo(
     () => ({
       isSupported,
+      isMicrophoneSupported,
       isListening,
       permissionState,
       error,
@@ -287,6 +293,7 @@ export const useSpeechRecognition = ({
     [
       error,
       isListening,
+      isMicrophoneSupported,
       isSupported,
       permissionState,
       requestPermission,
