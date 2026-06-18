@@ -8,7 +8,10 @@ type RowFieldAccessor =
   | "serialNumber"
   | "nameMr"
   | "nameEn"
+  | "entryType"
   | "contributionAmount"
+  | "giftNameMr"
+  | "giftNameEn"
   | "placeMr"
   | "placeEn";
 
@@ -207,6 +210,10 @@ export const RowsTable = ({
                   }
 
                   const value = column.accessor ? row[column.accessor] : "";
+                  const displayValue =
+                    column.accessor === "contributionAmount" && row.entryType === "gift"
+                      ? ""
+                      : value ?? "";
 
                   return (
                     <td
@@ -216,7 +223,7 @@ export const RowsTable = ({
                         column.accessor === "serialNumber" ? "font-semibold text-slate-900" : ""
                       }`}
                     >
-                      {value}
+                      {displayValue || "-"}
                     </td>
                   );
                 })}

@@ -336,7 +336,10 @@ export function GuidedRowEntryWizard() {
     const candidateRow: CreateRowInput = {
       nameMr: fieldStateById.nameMr.value.trim(),
       nameEn: fieldStateById.nameEn.value.trim(),
+      entryType: "cash",
       contributionAmount: Number.parseInt(normalizeAmountInput(fieldStateById.contributionAmount.value), 10),
+      giftNameMr: null,
+      giftNameEn: null,
       placeMr: fieldStateById.placeMr.value.trim(),
       placeEn: fieldStateById.placeEn.value.trim()
     }

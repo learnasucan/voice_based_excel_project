@@ -1,8 +1,11 @@
 export const exportColumns = [
-  "Serial Number",
-  "Name (Marathi)",
-  "Name (English)",
-  "Contribution Amount",
-  "Place (Marathi)",
-  "Place (English)"
+  "Serial",
+  "Name (MR)",
+  "Name (EN)",
+  "Entry Type",
+  "Amount",
+  "Gift (MR)",
+  "Gift (EN)",
+  "Place (MR)",
+  "Place (EN)"
 ] as const;

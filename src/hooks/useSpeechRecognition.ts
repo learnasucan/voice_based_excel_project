@@ -55,6 +55,9 @@ type UseSpeechRecognitionOptions = {
 
 type MicrophonePermissionState = "unknown" | "granted" | "denied" | "prompt" | "unsupported";
 
+const VOICE_CAPTURE_TIMEOUT_MS = 15000;
+const VOICE_SILENCE_TIMEOUT_MS = 3000;
+
 const mapSpeechRecognitionError = (
   event: SpeechRecognitionErrorEvent,
   lang: string
@@ -123,6 +126,8 @@ export const useSpeechRecognition = ({
   onTranscript
 }: UseSpeechRecognitionOptions) => {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const captureTimeoutRef = useRef<number | null>(null);
+  const silenceTimeoutRef = useRef<number | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   const [isMicrophoneSupported, setIsMicrophoneSupported] = useState(false);
@@ -147,6 +152,18 @@ export const useSpeechRecognition = ({
       setPermissionState(status.state);
     } catch {
       setPermissionState("unknown");
+    }
+  }, []);
+
+  const clearListeningTimers = useCallback(() => {
+    if (captureTimeoutRef.current) {
+      window.clearTimeout(captureTimeoutRef.current);
+      captureTimeoutRef.current = null;
+    }
+
+    if (silenceTimeoutRef.current) {
+      window.clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
     }
   }, []);
 
@@ -183,6 +200,7 @@ export const useSpeechRecognition = ({
     };
 
     recognition.onend = () => {
+      clearListeningTimers();
       setIsListening(false);
     };
 
@@ -194,10 +212,19 @@ export const useSpeechRecognition = ({
       if (mapped) {
         setError(mapped);
       }
+      clearListeningTimers();
       setIsListening(false);
     };
 
     recognition.onresult = (event) => {
+      if (silenceTimeoutRef.current) {
+        window.clearTimeout(silenceTimeoutRef.current);
+      }
+
+      silenceTimeoutRef.current = window.setTimeout(() => {
+        recognitionRef.current?.stop();
+      }, VOICE_SILENCE_TIMEOUT_MS);
+
       const parts: string[] = [];
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
@@ -215,12 +242,13 @@ export const useSpeechRecognition = ({
     recognitionRef.current = recognition;
 
     return () => {
+      clearListeningTimers();
       recognition.stop();
       recognitionRef.current = null;
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [lang, onTranscript, refreshPermissionState]);
+  }, [clearListeningTimers, lang, onTranscript, refreshPermissionState]);
 
   const requestPermission = useCallback(async (): Promise<boolean> => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -262,17 +290,24 @@ export const useSpeechRecognition = ({
 
     setError(null);
     recognitionRef.current.lang = lang;
+    recognitionRef.current.continuous = true;
     try {
       recognitionRef.current.start();
+      clearListeningTimers();
+      captureTimeoutRef.current = window.setTimeout(() => {
+        recognitionRef.current?.stop();
+      }, VOICE_CAPTURE_TIMEOUT_MS);
     } catch {
+      clearListeningTimers();
       setError("Could not start microphone. Verify mic permission and retry.");
       setIsListening(false);
     }
-  }, [isSupported, lang, permissionState]);
+  }, [clearListeningTimers, isSupported, lang, permissionState]);
 
   const stopListening = useCallback(() => {
+    clearListeningTimers();
     recognitionRef.current?.stop();
-  }, []);
+  }, [clearListeningTimers]);
 
   const resetError = useCallback(() => {
     setError(null);

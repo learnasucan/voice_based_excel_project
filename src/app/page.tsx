@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ContributionRow } from "@/lib/contracts/row";
+import { ContributionRow, EntryType } from "@/lib/contracts/row";
 import { deleteRow, fetchRows } from "@/lib/utils/apiClient";
 import { RowCaptureWizard } from "@/components/row-form/RowCaptureWizard";
 import { RowEditDialog } from "@/components/rows/RowEditDialog";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 
-type DuplicateFilter = "all" | "duplicate" | "possible" | "unique";
+type DuplicateFilter = "all" | "cash" | "gift" | "cash_and_gift" | "duplicate" | "possible" | "unique";
 
 const buildExportUrl = (
   format: "csv" | "xlsx" | "pdf",
@@ -20,7 +20,7 @@ const buildExportUrl = (
   `/api/export?format=${format}&search=${encodeURIComponent(search)}&fileName=${encodeURIComponent(fileName.trim())}`;
 
 const buildDuplicateKey = (row: ContributionRow): string =>
-  `${row.nameMrKey}|${row.contributionAmount}|${row.placeMrKey}`;
+  `${row.entryType}|${row.nameMrKey}|${row.contributionAmount ?? ""}|${row.giftNameMrKey ?? ""}|${row.placeMrKey}`;
 
 const formatAmount = (value: number): string =>
   new Intl.NumberFormat("en-IN", {
@@ -41,6 +41,8 @@ const DEFAULT_TABLE_COLUMNS: RowsTableColumn[] = [
     accessor: "contributionAmount",
     width: 140
   },
+  { id: "entryType", label: "Type", kind: "field", accessor: "entryType", width: 130 },
+  { id: "giftNameMr", label: "Gift (MR)", kind: "field", accessor: "giftNameMr", width: 160 },
   { id: "place", label: "Place (MR / EN)", kind: "place", width: 260 },
   { id: "actions", label: "Actions", kind: "actions", width: 190 }
 ];
@@ -170,6 +172,15 @@ export default function HomePage() {
         return false;
       }
 
+      if (
+        (["cash", "gift", "cash_and_gift"] as EntryType[]).includes(
+          duplicateFilter as EntryType
+        ) &&
+        row.entryType !== duplicateFilter
+      ) {
+        return false;
+      }
+
       if (!normalizedSearch) {
         return true;
       }
@@ -178,9 +189,12 @@ export default function HomePage() {
         String(row.serialNumber),
         row.nameMr,
         row.nameEn,
+        row.entryType,
+        row.giftNameMr ?? "",
+        row.giftNameEn ?? "",
         row.placeMr,
         row.placeEn,
-        String(row.contributionAmount)
+        String(row.contributionAmount ?? "")
       ]
         .map(normalize)
         .join(" ");
@@ -190,12 +204,26 @@ export default function HomePage() {
   }, [duplicateFilter, duplicateRowIds, rows, search]);
 
   const overallTotal = useMemo(
-    () => rows.reduce((sum, row) => sum + row.contributionAmount, 0),
+    () =>
+      rows.reduce(
+        (sum, row) =>
+          row.entryType === "cash" || row.entryType === "cash_and_gift"
+            ? sum + (row.contributionAmount ?? 0)
+            : sum,
+        0
+      ),
     [rows]
   );
 
   const filteredTotal = useMemo(
-    () => visibleRows.reduce((sum, row) => sum + row.contributionAmount, 0),
+    () =>
+      visibleRows.reduce(
+        (sum, row) =>
+          row.entryType === "cash" || row.entryType === "cash_and_gift"
+            ? sum + (row.contributionAmount ?? 0)
+            : sum,
+        0
+      ),
     [visibleRows]
   );
 
@@ -284,6 +312,16 @@ export default function HomePage() {
     target?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const sidebarIcons: Record<string, string> = {
+  Entry: "/entry.png",
+  Records: "/records.png",
+  Reports: "/reports.png",
+  Export: "/export.png",
+  Settings: "/settings.png",
+  Theme: "/theme.png",
+  Light: "/theme.png"
+};
+
   const handleSideMenuClick = (item: string) => {
     if (item === "Entry" || item === "Records" || item === "Reports") {
       scrollToSection(item);
@@ -340,7 +378,12 @@ export default function HomePage() {
                       : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
                 }`}
               >
-                <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
+                
+<img
+  src={sidebarIcons[item]}
+  alt=""
+  className="h-6 w-6 object-contain"
+/>
                 {item}
               </button>
             ))}
@@ -405,6 +448,9 @@ export default function HomePage() {
               className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             >
               <option value="all">All rows</option>
+              <option value="cash">Cash</option>
+              <option value="gift">Gift</option>
+              <option value="cash_and_gift">Cash + Gift</option>
               <option value="unique">Unique only</option>
               <option value="duplicate">Duplicates only</option>
               <option value="possible">Possible duplicates</option>

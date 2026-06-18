@@ -50,21 +50,29 @@ const mapRow = (row: PrismaContributionRow): ContributionRow => ({
   serialNumber: row.serialNumber,
   nameMr: row.nameMr,
   nameEn: row.nameEn,
+  entryType: row.entryType as ContributionRow["entryType"],
   contributionAmount: row.contributionAmount,
+  giftNameMr: row.giftNameMr,
+  giftNameEn: row.giftNameEn,
   placeMr: row.placeMr,
   placeEn: row.placeEn,
   nameMrKey: row.nameMrKey,
   placeMrKey: row.placeMrKey,
+  giftNameMrKey: row.giftNameMrKey,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt
 });
 
 const sanitizeCreateLikePayload = (payload: Omit<UpdateRowInput, "id">) => ({
+  entryType: payload.entryType,
   nameMr: normalizeSpaces(payload.nameMr),
   // Optional transliterations are allowed to keep API stable for Worker A contracts.
   nameEn: normalizeSpaces(payload.nameEn ?? ""),
-  contributionAmount: payload.contributionAmount,
-  placeMr: normalizeSpaces(payload.placeMr),
+  contributionAmount:
+    payload.entryType === "gift" || payload.entryType === "unknown" ? null : payload.contributionAmount,
+  giftNameMr: payload.giftNameMr ? normalizeSpaces(payload.giftNameMr) : null,
+  giftNameEn: payload.giftNameEn ? normalizeSpaces(payload.giftNameEn) : null,
+  placeMr: normalizeSpaces(payload.placeMr ?? ""),
   placeEn: normalizeSpaces(payload.placeEn ?? "")
 });
 
@@ -81,8 +89,10 @@ const getDuplicateRowWithClient = async (
 
   return client.contributionRow.findFirst({
     where: {
+      entryType: key.entryType,
       nameMrKey: key.nameMrKey,
       contributionAmount: key.contributionAmount,
+      giftNameMrKey: key.giftNameMrKey,
       placeMrKey: key.placeMrKey,
       ...(input.excludeId
         ? {
@@ -113,23 +123,30 @@ const getNextSerialNumberWithClient = async (client: ContributionRowClient): Pro
 const getNextSerialNumber = async (): Promise<number> => getNextSerialNumberWithClient(prisma);
 
 const getSummary = async (): Promise<RowSummaryResult> => {
-  const [totalRecords, aggregates] = await Promise.all([
+  const [totalRecords, lastSerial, cashAggregates] = await Promise.all([
     prisma.contributionRow.count(),
     prisma.contributionRow.aggregate({
-      _sum: {
-        contributionAmount: true
-      },
       _max: {
         serialNumber: true
+      }
+    }),
+    prisma.contributionRow.aggregate({
+      where: {
+        entryType: {
+          in: ["cash", "cash_and_gift"]
+        }
+      },
+      _sum: {
+        contributionAmount: true
       }
     })
   ]);
 
-  const lastSerialNumber = aggregates._max.serialNumber ?? 0;
+  const lastSerialNumber = lastSerial._max.serialNumber ?? 0;
 
   return {
     totalRecords,
-    totalContribution: aggregates._sum.contributionAmount ?? 0,
+    totalContribution: cashAggregates._sum.contributionAmount ?? 0,
     lastSerialNumber,
     nextSerialNumber: lastSerialNumber + 1
   };
@@ -142,6 +159,9 @@ const listRows = async (search = ""): Promise<RowListResult> => {
         OR: [
           { nameMr: { contains: normalizedSearch } },
           { nameEn: { contains: normalizedSearch } },
+          { entryType: { contains: normalizedSearch } },
+          { giftNameMr: { contains: normalizedSearch } },
+          { giftNameEn: { contains: normalizedSearch } },
           { placeMr: { contains: normalizedSearch } },
           { placeEn: { contains: normalizedSearch } }
         ]
@@ -156,7 +176,13 @@ const listRows = async (search = ""): Promise<RowListResult> => {
   });
 
   const mappedRows = rows.map(mapRow);
-  const totalAmount = mappedRows.reduce((sum, row) => sum + row.contributionAmount, 0);
+  const totalAmount = mappedRows.reduce(
+    (sum, row) =>
+      row.entryType === "cash" || row.entryType === "cash_and_gift"
+        ? sum + (row.contributionAmount ?? 0)
+        : sum,
+    0
+  );
 
   return {
     rows: mappedRows,
@@ -178,7 +204,9 @@ const createRow = async (input: CreateRowInput): Promise<ContributionRow> => {
 
   const existingDuplicate = await getDuplicateRow({
     nameMr: payload.nameMr,
+    entryType: payload.entryType,
     contributionAmount: payload.contributionAmount,
+    giftNameMr: payload.giftNameMr,
     placeMr: payload.placeMr
   });
 
@@ -193,7 +221,9 @@ const createRow = async (input: CreateRowInput): Promise<ContributionRow> => {
       const created = await prisma.$transaction(async (tx) => {
         const duplicateInTransaction = await getDuplicateRowWithClient(tx, {
           nameMr: payload.nameMr,
+          entryType: payload.entryType,
           contributionAmount: payload.contributionAmount,
+          giftNameMr: payload.giftNameMr,
           placeMr: payload.placeMr
         });
 
@@ -206,12 +236,16 @@ const createRow = async (input: CreateRowInput): Promise<ContributionRow> => {
         return tx.contributionRow.create({
           data: {
             serialNumber,
+            entryType: payload.entryType,
             nameMr: payload.nameMr,
             nameEn: payload.nameEn,
             contributionAmount: payload.contributionAmount,
+            giftNameMr: payload.giftNameMr,
+            giftNameEn: payload.giftNameEn,
             placeMr: payload.placeMr,
             placeEn: payload.placeEn,
             nameMrKey: normalized.nameMrKey,
+            giftNameMrKey: normalized.giftNameMrKey,
             placeMrKey: normalized.placeMrKey
           }
         });
@@ -229,7 +263,9 @@ const createRow = async (input: CreateRowInput): Promise<ContributionRow> => {
 
       const matchedDuplicate = await getDuplicateRow({
         nameMr: payload.nameMr,
+        entryType: payload.entryType,
         contributionAmount: payload.contributionAmount,
+        giftNameMr: payload.giftNameMr,
         placeMr: payload.placeMr
       });
 
@@ -259,7 +295,9 @@ const updateRow = async (input: UpdateRowInput): Promise<ContributionRow> => {
 
   const duplicate = await getDuplicateRow({
     nameMr: payload.nameMr,
+    entryType: payload.entryType,
     contributionAmount: payload.contributionAmount,
+    giftNameMr: payload.giftNameMr,
     placeMr: payload.placeMr,
     excludeId: input.id
   });
@@ -275,11 +313,15 @@ const updateRow = async (input: UpdateRowInput): Promise<ContributionRow> => {
       where: { id: input.id },
       data: {
         nameMr: payload.nameMr,
+        entryType: payload.entryType,
         nameEn: payload.nameEn,
         contributionAmount: payload.contributionAmount,
+        giftNameMr: payload.giftNameMr,
+        giftNameEn: payload.giftNameEn,
         placeMr: payload.placeMr,
         placeEn: payload.placeEn,
         nameMrKey: normalized.nameMrKey,
+        giftNameMrKey: normalized.giftNameMrKey,
         placeMrKey: normalized.placeMrKey
       }
     });
@@ -289,7 +331,9 @@ const updateRow = async (input: UpdateRowInput): Promise<ContributionRow> => {
     if (isUniqueConstraintError(error)) {
       const matchedDuplicate = await getDuplicateRow({
         nameMr: payload.nameMr,
+        entryType: payload.entryType,
         contributionAmount: payload.contributionAmount,
+        giftNameMr: payload.giftNameMr,
         placeMr: payload.placeMr,
         excludeId: input.id
       });

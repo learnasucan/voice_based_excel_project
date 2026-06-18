@@ -4,7 +4,7 @@ import { ExportRow } from "@/lib/server/export/types";
 
 export const buildXlsx = (rows: ExportRow[]): Buffer => {
   const { headers, rows: values, total } = mapRowsToSheetData(rows);
-  const worksheetData = [headers, ...values, ["TOTAL", "", "", total, "", ""]];
+  const worksheetData = [headers, ...values, ["TOTAL", "", "", "", total, "", "", "", ""]];
 
   const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
   const workbook = XLSX.utils.book_new();

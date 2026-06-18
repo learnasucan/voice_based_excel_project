@@ -47,11 +47,14 @@ export const VoiceFieldInput = ({
       serialNumber: currentDraft.serialNumber,
       nameMr: currentDraft.nameMr,
       nameEn: currentDraft.nameEn,
+      entryType: currentDraft.entryType,
       contributionAmount:
         currentDraft.contributionAmount ??
         (typeof value === "string" && field === "contributionAmount"
           ? getAmountAsNumber(value)
           : null),
+      giftNameMr: currentDraft.giftNameMr,
+      giftNameEn: currentDraft.giftNameEn,
       placeMr: currentDraft.placeMr,
       placeEn: currentDraft.placeEn
     }),

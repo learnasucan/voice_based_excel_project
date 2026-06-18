@@ -20,7 +20,7 @@ const resolveMarathiFontPath = (): string | null => {
 
 const drawRow = (
   document: PDFKit.PDFDocument,
-  row: Array<string | number>,
+  row: Array<string | number | null>,
   y: number,
   columnWidths: number[],
   rowHeight: number
@@ -39,7 +39,7 @@ const drawRow = (
 
 const measureRowHeight = (
   document: PDFKit.PDFDocument,
-  row: Array<string | number>,
+  row: Array<string | number | null>,
   columnWidths: number[]
 ): number => {
   const textHeight = row.reduce<number>((maxHeight, value, index) => {
@@ -75,7 +75,7 @@ export const buildPdf = async (rows: ExportRow[]): Promise<Buffer> => {
     doc.moveDown(0.5);
     doc.fontSize(9);
 
-    const columnWidths = [42, 110, 110, 70, 90, 90];
+    const columnWidths = [32, 82, 82, 54, 48, 72, 72, 72, 72];
     let y = doc.y;
     const headerValues = [...headers];
     const headerHeight = measureRowHeight(doc, headerValues, columnWidths);
@@ -88,7 +88,7 @@ export const buildPdf = async (rows: ExportRow[]): Promise<Buffer> => {
       .stroke();
 
     for (const row of values) {
-      const rowValues = row as Array<string | number>;
+      const rowValues = row as Array<string | number | null>;
       const rowHeight = measureRowHeight(doc, rowValues, columnWidths);
 
       if (y + rowHeight > doc.page.height - 60) {
@@ -112,7 +112,7 @@ export const buildPdf = async (rows: ExportRow[]): Promise<Buffer> => {
       .stroke();
     y += 6;
 
-    const totalRow: Array<string | number> = ["TOTAL", "", "", total, "", ""];
+    const totalRow: Array<string | number | null> = ["TOTAL", "", "", "", total, "", "", "", ""];
     const totalHeight = measureRowHeight(doc, totalRow, columnWidths);
     drawRow(doc, totalRow, y, columnWidths, totalHeight);
 

@@ -12,17 +12,24 @@ model ContributionRow {
   serialNumber       Int      @unique
   nameMr             String
   nameEn             String
-  contributionAmount Int
+  entryType          String   @default("cash")
+  contributionAmount Int?
+  giftNameMr         String?
+  giftNameEn         String?
   placeMr            String
   placeEn            String
   nameMrKey          String
   placeMrKey         String
+  giftNameMrKey      String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([nameMrKey, contributionAmount, placeMrKey], name: "uniq_row_identity")
+  @@unique([entryType, nameMrKey, contributionAmount, giftNameMrKey, placeMrKey], name: "uniq_row_identity")
   @@index([nameMr])
   @@index([nameEn])
+  @@index([entryType])
+  @@index([giftNameMr])
+  @@index([giftNameEn])
   @@index([placeMr])
   @@index([placeEn])
 }

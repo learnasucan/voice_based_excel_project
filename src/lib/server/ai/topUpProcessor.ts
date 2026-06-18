@@ -134,7 +134,10 @@ export const processTopUpVoiceWithAi = async (
     return {
       nameMr: "",
       nameEn: "",
+      entryType: "unknown",
       contributionAmount: null,
+      giftNameMr: null,
+      giftNameEn: null,
       placeMr: "",
       placeEn: "",
       confidence: 0.35,
@@ -196,7 +199,10 @@ export const processTopUpVoiceWithAi = async (
   return {
     nameMr,
     nameEn,
+    entryType: "cash",
     contributionAmount: contributionAmount ?? null,
+    giftNameMr: null,
+    giftNameEn: null,
     placeMr,
     placeEn,
     confidence: averageConfidence(

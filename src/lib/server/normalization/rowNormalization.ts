@@ -1,5 +1,5 @@
 import { NormalizedDuplicateKey } from "@/lib/contracts/normalization";
-import { CreateRowInput } from "@/lib/contracts/row";
+import { CreateRowInput, EntryType } from "@/lib/contracts/row";
 export { transliterateMarathiToEnglish } from "@/lib/normalization/marathiTransliteration";
 
 const DEVANAGARI_TO_ASCII = new Map<string, string>([
@@ -72,9 +72,17 @@ export const normalizeAmountInput = (value: string | number): number | null => {
 };
 
 export const buildNormalizedDuplicateKey = (
-  payload: Pick<CreateRowInput, "nameMr" | "placeMr" | "contributionAmount">
+  payload: {
+    entryType?: EntryType;
+    nameMr: string;
+    placeMr: string;
+    contributionAmount: CreateRowInput["contributionAmount"];
+    giftNameMr?: CreateRowInput["giftNameMr"];
+  }
 ): NormalizedDuplicateKey => ({
+  entryType: payload.entryType ?? "cash",
   nameMrKey: normalizeTextKey(payload.nameMr),
   contributionAmount: payload.contributionAmount,
+  giftNameMrKey: payload.giftNameMr ? normalizeTextKey(payload.giftNameMr) : null,
   placeMrKey: normalizeTextKey(payload.placeMr)
 });

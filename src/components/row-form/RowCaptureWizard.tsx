@@ -1,98 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ContributionRow } from "@/lib/contracts/row";
-import { transliterateMarathiToEnglish } from "@/lib/normalization/marathiTransliteration";
+import { ContributionRow, EntryType } from "@/lib/contracts/row";
+import {
+  createInitialEntryDraft,
+  ParseSuggestion,
+  ParsedEntryDraft,
+  parseMarathiEntryText,
+  transliterateCached
+} from "@/lib/entryParser/marathiEntryParser";
 import { ApiClientError, checkDuplicate, createRow } from "@/lib/utils/apiClient";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
-
-type DraftForm = {
-  serialNumber: number;
-  nameMr: string;
-  nameEn: string;
-  contributionAmount: string;
-  placeMr: string;
-  placeEn: string;
-};
 
 type Props = {
   nextSerialNumber: number;
   onRowCreated: (row: ContributionRow) => void;
 };
 
-type ParseResult = {
-  draft: Partial<DraftForm>;
-  confidence: number;
-  warnings: string[];
-};
-
-const DEVANAGARI_DIGITS: Record<string, string> = {
-  "०": "0",
-  "१": "1",
-  "२": "2",
-  "३": "3",
-  "४": "4",
-  "५": "5",
-  "६": "6",
-  "७": "7",
-  "८": "8",
-  "९": "9"
-};
-
-const TRANSLITERATION_CACHE: Record<string, string> = {
-  "नेवाळे": "Nevale",
-  "नेवाले": "Nevale",
-  "पळस्पे": "Palaspe",
-  "बारामती": "Baramati",
-  "इंदापूर": "Indapur",
-  "सासवड": "Saswad",
-  "लोणंद": "Lonand",
-  "कर्जत": "Karjat",
-  "कृष्णा": "Krishna",
-  "रावळे": "Ravale",
-  "रावले": "Ravale"
-};
-
-const AMOUNT_WORDS: Record<string, number> = {
-  "पाचशे": 500,
-  "दोनशे": 200,
-  "तीनशे": 300,
-  "चारशे": 400,
-  "सहाशे": 600,
-  "सातशे": 700,
-  "आठशे": 800,
-  "नऊशे": 900,
-  "हजार": 1000,
-  "एक हजार": 1000,
-  "one hundred": 100,
-  "two hundred": 200,
-  "three hundred": 300,
-  "four hundred": 400,
-  "five hundred": 500,
-  "six hundred": 600,
-  "seven hundred": 700,
-  "eight hundred": 800,
-  "nine hundred": 900,
-  "one thousand": 1000
-};
-
-const createInitialDraft = (serialNumber: number): DraftForm => ({
-  serialNumber,
-  nameMr: "",
-  nameEn: "",
-  contributionAmount: "",
-  placeMr: "",
-  placeEn: ""
-});
-
 const normalizeSpaces = (value: string): string => value.replace(/\s+/g, " ").trim();
-
-const toAsciiDigits = (value: string): string =>
-  Array.from(value)
-    .map((char) => DEVANAGARI_DIGITS[char] ?? char)
-    .join("");
 
 const titleCase = (value: string): string =>
   normalizeSpaces(value)
@@ -100,92 +27,11 @@ const titleCase = (value: string): string =>
     .map((part) => (part ? part[0].toUpperCase() + part.slice(1).toLowerCase() : part))
     .join(" ");
 
-const transliterateCached = (value: string): string =>
-  normalizeSpaces(value)
-    .split(" ")
-    .map((token) => TRANSLITERATION_CACHE[token] ?? transliterateMarathiToEnglish(token))
-    .join(" ");
-
-const parseAmountToken = (value: string): number | null => {
-  const normalized = normalizeSpaces(toAsciiDigits(value).replace(/[₹,]/g, " "));
-  const compactNumeric = normalized.replace(/\s+/g, "");
-  if (/^(?:rs|inr)?\d+$/.test(compactNumeric.toLowerCase())) {
-    const parsed = Number.parseInt(compactNumeric.replace(/^(?:rs|inr)/i, ""), 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  }
-
-  const lower = normalized.toLowerCase();
-  return AMOUNT_WORDS[lower] ?? null;
-};
-
-const parseEntryText = (text: string, serialNumber: number): ParseResult => {
-  const cleaned = normalizeSpaces(text);
-  const warnings: string[] = [];
-
-  if (!cleaned) {
-    return {
-      draft: createInitialDraft(serialNumber),
-      confidence: 0,
-      warnings: ["Enter or speak one entry before parsing."]
-    };
-  }
-
-  const tokens = cleaned.split(" ");
-  let amountStart = -1;
-  let amountEnd = -1;
-  let amount: number | null = null;
-
-  for (let start = 0; start < tokens.length; start += 1) {
-    for (let end = start; end < Math.min(tokens.length, start + 3); end += 1) {
-      const candidate = tokens.slice(start, end + 1).join(" ");
-      const parsed = parseAmountToken(candidate);
-      if (parsed) {
-        amountStart = start;
-        amountEnd = end;
-        amount = parsed;
-        break;
-      }
-    }
-
-    if (amount) {
-      break;
-    }
-  }
-
-  if (!amount || amountStart < 0) {
-    return {
-      draft: {
-        ...createInitialDraft(serialNumber),
-        nameMr: cleaned
-      },
-      confidence: 0.35,
-      warnings: ["Amount was not detected. Use format: Name Amount Place."]
-    };
-  }
-
-  const nameMr = normalizeSpaces(tokens.slice(0, amountStart).join(" "));
-  const placeMr = normalizeSpaces(tokens.slice(amountEnd + 1).join(" "));
-
-  if (!nameMr) {
-    warnings.push("Name is missing before the amount.");
-  }
-
-  if (!placeMr) {
-    warnings.push("Place is missing after the amount.");
-  }
-
-  return {
-    draft: {
-      serialNumber,
-      nameMr,
-      nameEn: titleCase(transliterateCached(nameMr)),
-      contributionAmount: String(amount),
-      placeMr,
-      placeEn: titleCase(transliterateCached(placeMr))
-    },
-    confidence: warnings.length ? 0.65 : 0.92,
-    warnings
-  };
+const entryTypeLabels: Record<EntryType, string> = {
+  cash: "Cash",
+  gift: "Gift",
+  cash_and_gift: "Cash + Gift",
+  unknown: "Unknown"
 };
 
 const formatCurrency = (value: string): string => {
@@ -202,22 +48,24 @@ const formatCurrency = (value: string): string => {
 };
 
 export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
-  const [draft, setDraft] = useState<DraftForm>(createInitialDraft(nextSerialNumber));
+  const [draft, setDraft] = useState<ParsedEntryDraft>(createInitialEntryDraft(nextSerialNumber));
   const [entryText, setEntryText] = useState("");
   const [manualMode, setManualMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<ParseSuggestion[]>([]);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [confidence, setConfidence] = useState<number | null>(null);
 
-  const applyParseResult = (result: ParseResult) => {
+  const applyParseResult = (result: ReturnType<typeof parseMarathiEntryText>) => {
     setDraft((prev) => ({
       ...prev,
       ...result.draft
     }));
     setConfidence(result.confidence);
     setWarnings(result.warnings);
+    setSuggestions(result.suggestions);
     setDuplicateWarning(null);
     setStatus(result.warnings.length ? "Please verify and edit before saving." : "Parsed locally. Verify and save.");
   };
@@ -226,7 +74,7 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
     lang: "mr-IN",
     onTranscript: (transcript) => {
       setEntryText(transcript);
-      applyParseResult(parseEntryText(transcript, nextSerialNumber));
+      applyParseResult(parseMarathiEntryText(transcript, nextSerialNumber));
     }
   });
 
@@ -236,6 +84,8 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
         draft.nameMr ||
           draft.nameEn ||
           draft.contributionAmount ||
+          draft.giftNameMr ||
+          draft.giftNameEn ||
           draft.placeMr ||
           draft.placeEn
       ),
@@ -246,23 +96,29 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
     const missing: string[] = [];
     if (!draft.nameMr.trim()) missing.push("Name (MR)");
     if (!draft.nameEn.trim()) missing.push("Name (EN)");
-    if (!draft.contributionAmount.trim()) missing.push("Amount");
-    if (!draft.placeMr.trim()) missing.push("Place (MR)");
-    if (!draft.placeEn.trim()) missing.push("Place (EN)");
+    if ((draft.entryType === "cash" || draft.entryType === "cash_and_gift") && !draft.contributionAmount.trim()) {
+      missing.push("Amount");
+    }
+    if ((draft.entryType === "gift" || draft.entryType === "cash_and_gift") && !draft.giftNameMr.trim()) {
+      missing.push("Gift (MR)");
+    }
+    if (draft.entryType === "cash" && !draft.placeMr.trim()) missing.push("Place (MR)");
+    if (draft.entryType === "cash" && !draft.placeEn.trim()) missing.push("Place (EN)");
     return missing;
   }, [draft]);
 
   const clearDraft = () => {
-    setDraft(createInitialDraft(nextSerialNumber));
+    setDraft(createInitialEntryDraft(nextSerialNumber));
     setEntryText("");
     setWarnings([]);
+    setSuggestions([]);
     setDuplicateWarning(null);
     setConfidence(null);
     setStatus(null);
   };
 
   const parseManualEntry = () => {
-    applyParseResult(parseEntryText(entryText, nextSerialNumber));
+    applyParseResult(parseMarathiEntryText(entryText, nextSerialNumber));
     setManualMode(true);
   };
 
@@ -273,13 +129,19 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
 
     const amount = Number.parseInt(draft.contributionAmount, 10);
 
+    if (draft.entryType === "unknown" || draft.requiresConfirmation) {
+      setSaving(false);
+      setStatus("Please confirm whether this is Cash, Gift, or Cash + Gift before saving.");
+      return;
+    }
+
     if (missingFields.length > 0) {
       setSaving(false);
       setStatus(`Complete required fields: ${missingFields.join(", ")}.`);
       return;
     }
 
-    if (!Number.isFinite(amount) || amount <= 0) {
+    if ((draft.entryType === "cash" || draft.entryType === "cash_and_gift") && (!Number.isFinite(amount) || amount <= 0)) {
       setSaving(false);
       setStatus("Amount must be a valid positive number.");
       return;
@@ -287,8 +149,11 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
 
     try {
       const duplicateResult = await checkDuplicate({
+        entryType: draft.entryType,
         nameMr: draft.nameMr,
-        contributionAmount: amount,
+        contributionAmount:
+          draft.entryType === "cash" || draft.entryType === "cash_and_gift" ? amount : null,
+        giftNameMr: draft.giftNameMr || null,
         placeMr: draft.placeMr
       });
 
@@ -302,15 +167,20 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
       const created = await createRow({
         nameMr: draft.nameMr,
         nameEn: draft.nameEn,
-        contributionAmount: amount,
+        entryType: draft.entryType,
+        contributionAmount:
+          draft.entryType === "cash" || draft.entryType === "cash_and_gift" ? amount : null,
+        giftNameMr: draft.giftNameMr || null,
+        giftNameEn: draft.giftNameEn || null,
         placeMr: draft.placeMr,
         placeEn: draft.placeEn
       });
 
       onRowCreated(created);
-      setDraft(createInitialDraft(created.serialNumber + 1));
+      setDraft(createInitialEntryDraft(created.serialNumber + 1));
       setEntryText("");
       setWarnings([]);
+      setSuggestions([]);
       setConfidence(null);
       setStatus(`Saved row #${created.serialNumber}.`);
     } catch (error: unknown) {
@@ -329,16 +199,44 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
     }
   };
 
-  const updateDraft = (field: keyof DraftForm, value: string) => {
+  const updateDraft = (field: keyof ParsedEntryDraft, value: string) => {
     setDraft((prev) => ({
       ...prev,
       [field]: value,
       ...(field === "nameMr" ? { nameEn: titleCase(transliterateCached(value)) } : {}),
+      ...(field === "giftNameMr" ? { giftNameEn: titleCase(transliterateCached(value)) } : {}),
       ...(field === "placeMr" ? { placeEn: titleCase(transliterateCached(value)) } : {})
     }));
     setStatus(null);
     setDuplicateWarning(null);
   };
+
+  const updateEntryType = (entryType: EntryType) => {
+    setDraft((prev) => ({
+      ...prev,
+      entryType,
+      contributionAmount: entryType === "gift" ? "" : prev.contributionAmount,
+      giftNameMr: entryType === "cash" ? "" : prev.giftNameMr,
+      giftNameEn: entryType === "cash" ? "" : prev.giftNameEn,
+      requiresConfirmation: false
+    }));
+    setStatus(null);
+    setDuplicateWarning(null);
+  };
+
+  const applySuggestion = (suggestion: ParseSuggestion) => {
+    setDraft((prev) => ({
+      ...prev,
+      ...suggestion.draft,
+      requiresConfirmation: false
+    }));
+    setWarnings([]);
+    setSuggestions([]);
+    setStatus(`${suggestion.label} selected. Verify and save.`);
+  };
+
+  const showAmount = draft.entryType === "cash" || draft.entryType === "cash_and_gift" || draft.entryType === "unknown";
+  const showGift = draft.entryType === "gift" || draft.entryType === "cash_and_gift" || draft.entryType === "unknown";
 
   return (
     <div className="space-y-3">
@@ -353,7 +251,7 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
                 </svg>
               </span>
               <h2 className="text-base font-bold text-slate-950">Quick Entry</h2>
-              <p className="text-sm text-slate-500">Speak: Name + Amount + Place</p>
+              <p className="text-sm text-slate-500">Speak: Name + Amount/Gift + Place</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -398,13 +296,15 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
                   ))}
                 </div>
                 <p className="mt-1 text-sm font-semibold text-emerald-700">
-                  {speech.isListening ? "Listening..." : "Ready for one full entry"}
+                  {speech.isListening
+                    ? "Listening... speak name, amount/gift, and place"
+                    : "Ready for one full entry"}
                 </p>
-                <p className="text-xs text-slate-600">Example: कृष्णा रावळे ५०० नेवाळे</p>
+                <p className="text-xs text-slate-600">Example: कृष्णा रावळे ५०० नेवाळे / सतीश पाटील भेट फळे</p>
               </div>
             </div>
             <p className="text-xs text-slate-500">
-              Say once: नाव + रक्कम + ठिकाण
+              Say once: नाव + रक्कम/भेट + ठिकाण
             </p>
           </div>
 
@@ -442,6 +342,47 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
           </Button>
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold text-slate-600">Entry Type</span>
+          {(["cash", "gift", "cash_and_gift"] as EntryType[]).map((entryType) => (
+            <button
+              key={entryType}
+              type="button"
+              onClick={() => updateEntryType(entryType)}
+              className={`rounded-md border px-3 py-1.5 text-sm font-semibold ${
+                draft.entryType === entryType
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {entryTypeLabels[entryType]}
+            </button>
+          ))}
+        </div>
+
+        {draft.requiresConfirmation || suggestions.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm font-semibold text-amber-900">
+              We found both amount and gift possibility. Please confirm.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {suggestions.map((suggestion) => (
+                <Button
+                  key={suggestion.label}
+                  type="button"
+                  variant="secondary"
+                  onClick={() => applySuggestion(suggestion)}
+                >
+                  {suggestion.label}
+                </Button>
+              ))}
+              <Button type="button" variant="ghost" onClick={() => setManualMode(true)}>
+                Edit manually
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-3 grid gap-3 xl:grid-cols-[1fr_1fr_1fr_auto]">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <label className="text-xs font-semibold text-slate-600">Name (MR)</label>
@@ -462,18 +403,41 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
             />
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <label className="text-xs font-semibold text-slate-600">Amount</label>
-            <Input
-              aria-label="Contribution amount"
-              value={draft.contributionAmount}
-              onChange={(event) => updateDraft("contributionAmount", event.target.value)}
-              placeholder="500"
-              inputMode="numeric"
-              className="mt-1 border-0 bg-transparent px-0 text-lg font-bold focus:ring-0"
-            />
-            <p className="mt-3 text-sm text-slate-500">{formatCurrency(draft.contributionAmount)}</p>
-          </div>
+          {showAmount ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <label className="text-xs font-semibold text-slate-600">Amount</label>
+              <Input
+                aria-label="Contribution amount"
+                value={draft.contributionAmount}
+                onChange={(event) => updateDraft("contributionAmount", event.target.value)}
+                placeholder="500"
+                inputMode="numeric"
+                className="mt-1 border-0 bg-transparent px-0 text-lg font-bold focus:ring-0"
+              />
+              <p className="mt-3 text-sm text-slate-500">{formatCurrency(draft.contributionAmount)}</p>
+            </div>
+          ) : null}
+
+          {showGift ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <label className="text-xs font-semibold text-slate-600">Gift (MR)</label>
+              <Input
+                aria-label="Gift Marathi"
+                value={draft.giftNameMr}
+                onChange={(event) => updateDraft("giftNameMr", event.target.value)}
+                placeholder="फळे"
+                className="mt-1 border-0 bg-transparent px-0 text-base font-semibold focus:ring-0"
+              />
+              <label className="mt-2 block text-xs font-semibold text-slate-600">Gift (EN)</label>
+              <Input
+                aria-label="Gift English"
+                value={draft.giftNameEn}
+                onChange={(event) => updateDraft("giftNameEn", event.target.value)}
+                placeholder="Phale"
+                className="mt-1 border-0 bg-transparent px-0 focus:ring-0"
+              />
+            </div>
+          ) : null}
 
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <label className="text-xs font-semibold text-slate-600">Place (MR)</label>

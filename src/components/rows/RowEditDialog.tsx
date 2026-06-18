@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ContributionRow, VoiceCaptureFieldName } from "@/lib/contracts/row";
+import { ContributionRow, EntryType, VoiceCaptureFieldName } from "@/lib/contracts/row";
 import { ApiClientError, updateRow } from "@/lib/utils/apiClient";
 import { Button } from "@/components/ui/Button";
 import { VoiceFieldInput } from "@/components/voice/VoiceFieldInput";
@@ -15,7 +15,10 @@ type Props = {
 type EditableDraft = {
   nameMr: string;
   nameEn: string;
+  entryType: EntryType;
   contributionAmount: string;
+  giftNameMr: string;
+  giftNameEn: string;
   placeMr: string;
   placeEn: string;
 };
@@ -75,7 +78,10 @@ export const RowEditDialog = ({ row, onClose, onRowUpdated }: Props) => {
     setDraft({
       nameMr: row.nameMr,
       nameEn: row.nameEn,
-      contributionAmount: String(row.contributionAmount),
+      entryType: row.entryType,
+      contributionAmount: String(row.contributionAmount ?? ""),
+      giftNameMr: row.giftNameMr ?? "",
+      giftNameEn: row.giftNameEn ?? "",
       placeMr: row.placeMr,
       placeEn: row.placeEn
     });
@@ -92,7 +98,10 @@ export const RowEditDialog = ({ row, onClose, onRowUpdated }: Props) => {
       serialNumber: row.serialNumber,
       nameMr: draft.nameMr,
       nameEn: draft.nameEn,
+      entryType: draft.entryType,
       contributionAmount: Number.isFinite(amount) && amount > 0 ? amount : null,
+      giftNameMr: draft.giftNameMr,
+      giftNameEn: draft.giftNameEn,
       placeMr: draft.placeMr,
       placeEn: draft.placeEn
     };
@@ -106,6 +115,22 @@ export const RowEditDialog = ({ row, onClose, onRowUpdated }: Props) => {
 
   const updateField = (field: VoiceCaptureFieldName, value: string) => {
     setDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
+    setError(null);
+    setDuplicateWarning(null);
+  };
+
+  const updateEntryType = (entryType: EntryType) => {
+    setDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            entryType,
+            contributionAmount: entryType === "gift" ? "" : prev.contributionAmount,
+            giftNameMr: entryType === "cash" ? "" : prev.giftNameMr,
+            giftNameEn: entryType === "cash" ? "" : prev.giftNameEn
+          }
+        : prev
+    );
     setError(null);
     setDuplicateWarning(null);
   };
@@ -126,27 +151,36 @@ export const RowEditDialog = ({ row, onClose, onRowUpdated }: Props) => {
         return;
       }
 
-      if (!draft.placeMr.trim()) {
+      if (draft.entryType === "cash" && !draft.placeMr.trim()) {
         setError("Place (Marathi) is required.");
         return;
       }
 
-      if (!draft.placeEn.trim()) {
+      if (draft.entryType === "cash" && !draft.placeEn.trim()) {
         setError("Place (English) is required.");
         return;
       }
 
       const amount = Number.parseInt(draft.contributionAmount, 10);
 
-      if (!Number.isFinite(amount) || amount <= 0) {
+      if ((draft.entryType === "cash" || draft.entryType === "cash_and_gift") && (!Number.isFinite(amount) || amount <= 0)) {
         setError("Contribution amount must be a valid positive number.");
+        return;
+      }
+
+      if ((draft.entryType === "gift" || draft.entryType === "cash_and_gift") && !draft.giftNameMr.trim()) {
+        setError("Gift (Marathi) is required.");
         return;
       }
 
       const updated = await updateRow(row.id, {
         nameMr: draft.nameMr,
         nameEn: draft.nameEn,
-        contributionAmount: amount,
+        entryType: draft.entryType,
+        contributionAmount:
+          draft.entryType === "cash" || draft.entryType === "cash_and_gift" ? amount : null,
+        giftNameMr: draft.giftNameMr || null,
+        giftNameEn: draft.giftNameEn || null,
         placeMr: draft.placeMr,
         placeEn: draft.placeEn
       });
@@ -196,6 +230,21 @@ export const RowEditDialog = ({ row, onClose, onRowUpdated }: Props) => {
         </div>
 
         <div className="space-y-3">
+          <div className="rounded-lg border border-slate-200 p-3">
+            <label className="text-sm font-semibold text-slate-900" htmlFor="edit-entry-type">
+              Entry Type
+            </label>
+            <select
+              id="edit-entry-type"
+              value={draft.entryType}
+              onChange={(event) => updateEntryType(event.target.value as EntryType)}
+              className="mt-2 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="cash">Cash</option>
+              <option value="gift">Gift</option>
+              <option value="cash_and_gift">Cash + Gift</option>
+            </select>
+          </div>
           {FIELD_CONFIGS.map((field) => (
             <VoiceFieldInput
               key={field.key}
@@ -216,6 +265,30 @@ export const RowEditDialog = ({ row, onClose, onRowUpdated }: Props) => {
               }}
             />
           ))}
+          {draft.entryType === "gift" || draft.entryType === "cash_and_gift" ? (
+            <div className="grid gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-2">
+              <label className="text-sm font-semibold text-slate-900">
+                Gift (Marathi)
+                <input
+                  value={draft.giftNameMr}
+                  onChange={(event) =>
+                    setDraft((prev) => (prev ? { ...prev, giftNameMr: event.target.value } : prev))
+                  }
+                  className="mt-2 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-normal"
+                />
+              </label>
+              <label className="text-sm font-semibold text-slate-900">
+                Gift (English)
+                <input
+                  value={draft.giftNameEn}
+                  onChange={(event) =>
+                    setDraft((prev) => (prev ? { ...prev, giftNameEn: event.target.value } : prev))
+                  }
+                  className="mt-2 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm font-normal"
+                />
+              </label>
+            </div>
+          ) : null}
         </div>
 
         {duplicateWarning ? (

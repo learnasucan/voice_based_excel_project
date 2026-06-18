@@ -15,17 +15,17 @@ import {
   type RowEditDraft
 } from "@/modules/records/components/rows-table.reducer";
 
-const formatCurrency = (value: number): string =>
+const formatCurrency = (value: number | null): string =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0
-  }).format(Number.isFinite(value) ? value : 0);
+  }).format(typeof value === "number" && Number.isFinite(value) ? value : 0);
 
 const normalizeText = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, " ");
 
 const buildDuplicateKey = (row: ContributionRow): string =>
-  `${row.nameMrKey}|${row.contributionAmount}|${row.placeMrKey}`;
+  `${row.entryType}|${row.nameMrKey}|${row.contributionAmount ?? ""}|${row.giftNameMrKey ?? ""}|${row.placeMrKey}`;
 
 const getDuplicateWarningMessage = (error: RowsClientError): string | null => {
   if (error.code !== "DUPLICATE_ROW") {
@@ -80,7 +80,10 @@ const validateDraft = (draft: RowEditDraft): string | null => {
 const draftToUpdateInput = (draft: RowEditDraft): CreateRowInput => ({
   nameMr: draft.nameMr.trim(),
   nameEn: draft.nameEn.trim(),
+  entryType: "cash",
   contributionAmount: Number(draft.contributionAmount),
+  giftNameMr: null,
+  giftNameEn: null,
   placeMr: draft.placeMr.trim(),
   placeEn: draft.placeEn.trim()
 });
@@ -150,7 +153,10 @@ export function RecordsTablePage() {
         String(row.serialNumber),
         row.nameMr,
         row.nameEn,
-        String(row.contributionAmount),
+        row.entryType,
+        row.giftNameMr ?? "",
+        row.giftNameEn ?? "",
+        String(row.contributionAmount ?? ""),
         row.placeMr,
         row.placeEn
       ]
@@ -162,12 +168,26 @@ export function RecordsTablePage() {
   }, [duplicateRowIds, state.duplicateFilter, state.rows, state.searchTerm]);
 
   const overallTotal = useMemo(
-    () => state.rows.reduce((sum, row) => sum + row.contributionAmount, 0),
+    () =>
+      state.rows.reduce(
+        (sum, row) =>
+          row.entryType === "cash" || row.entryType === "cash_and_gift"
+            ? sum + (row.contributionAmount ?? 0)
+            : sum,
+        0
+      ),
     [state.rows]
   );
 
   const filteredTotal = useMemo(
-    () => visibleRows.reduce((sum, row) => sum + row.contributionAmount, 0),
+    () =>
+      visibleRows.reduce(
+        (sum, row) =>
+          row.entryType === "cash" || row.entryType === "cash_and_gift"
+            ? sum + (row.contributionAmount ?? 0)
+            : sum,
+        0
+      ),
     [visibleRows]
   );
 
