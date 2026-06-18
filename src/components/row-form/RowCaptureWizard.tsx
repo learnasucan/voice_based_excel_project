@@ -1,17 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ContributionRow, VoiceCaptureFieldName } from "@/lib/contracts/row";
-import {
-  ApiClientError,
-  checkDuplicate,
-  createRow,
-  processVoiceTopUp
-} from "@/lib/utils/apiClient";
+import { useMemo, useState } from "react";
+import { ContributionRow } from "@/lib/contracts/row";
+import { transliterateMarathiToEnglish } from "@/lib/normalization/marathiTransliteration";
+import { ApiClientError, checkDuplicate, createRow } from "@/lib/utils/apiClient";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
-import { VoiceFieldInput } from "@/components/voice/VoiceFieldInput";
+import { Input } from "@/components/ui/Input";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
 
 type DraftForm = {
@@ -28,51 +22,61 @@ type Props = {
   onRowCreated: (row: ContributionRow) => void;
 };
 
-type FieldConfig = {
-  key: VoiceCaptureFieldName;
-  label: string;
-  prompt: string;
-  lang: string;
-  placeholder: string;
+type ParseResult = {
+  draft: Partial<DraftForm>;
+  confidence: number;
+  warnings: string[];
 };
 
-const FIELD_CONFIGS: FieldConfig[] = [
-  {
-    key: "nameMr",
-    label: "Name (Marathi)",
-    prompt: "Speak the Marathi name clearly.",
-    lang: "mr-IN",
-    placeholder: "उदा. वैभव जगताप"
-  },
-  {
-    key: "nameEn",
-    label: "Name (English)",
-    prompt: "Speak the English/transliterated name or use suggested text.",
-    lang: "en-IN",
-    placeholder: "e.g. Vaibhav Jagtap"
-  },
-  {
-    key: "contributionAmount",
-    label: "Contribution Amount",
-    prompt: "Speak amount (e.g. पाचशे / five hundred / 500).",
-    lang: "mr-IN",
-    placeholder: "e.g. 500"
-  },
-  {
-    key: "placeMr",
-    label: "Place (Marathi)",
-    prompt: "Speak the Marathi place name.",
-    lang: "mr-IN",
-    placeholder: "उदा. पुणे"
-  },
-  {
-    key: "placeEn",
-    label: "Place (English)",
-    prompt: "Speak the English/transliterated place or use suggested text.",
-    lang: "en-IN",
-    placeholder: "e.g. Pune"
-  }
-];
+const DEVANAGARI_DIGITS: Record<string, string> = {
+  "०": "0",
+  "१": "1",
+  "२": "2",
+  "३": "3",
+  "४": "4",
+  "५": "5",
+  "६": "6",
+  "७": "7",
+  "८": "8",
+  "९": "9"
+};
+
+const TRANSLITERATION_CACHE: Record<string, string> = {
+  "नेवाळे": "Nevale",
+  "नेवाले": "Nevale",
+  "पळस्पे": "Palaspe",
+  "बारामती": "Baramati",
+  "इंदापूर": "Indapur",
+  "सासवड": "Saswad",
+  "लोणंद": "Lonand",
+  "कर्जत": "Karjat",
+  "कृष्णा": "Krishna",
+  "रावळे": "Ravale",
+  "रावले": "Ravale"
+};
+
+const AMOUNT_WORDS: Record<string, number> = {
+  "पाचशे": 500,
+  "दोनशे": 200,
+  "तीनशे": 300,
+  "चारशे": 400,
+  "सहाशे": 600,
+  "सातशे": 700,
+  "आठशे": 800,
+  "नऊशे": 900,
+  "हजार": 1000,
+  "एक हजार": 1000,
+  "one hundred": 100,
+  "two hundred": 200,
+  "three hundred": 300,
+  "four hundred": 400,
+  "five hundred": 500,
+  "six hundred": 600,
+  "seven hundred": 700,
+  "eight hundred": 800,
+  "nine hundred": 900,
+  "one thousand": 1000
+};
 
 const createInitialDraft = (serialNumber: number): DraftForm => ({
   serialNumber,
@@ -83,180 +87,214 @@ const createInitialDraft = (serialNumber: number): DraftForm => ({
   placeEn: ""
 });
 
-const deriveAcceptedFromDraft = (
-  draft: Pick<DraftForm, "nameMr" | "nameEn" | "contributionAmount" | "placeMr" | "placeEn">
-): Record<VoiceCaptureFieldName, boolean> => ({
-  nameMr: draft.nameMr.trim().length > 0,
-  nameEn: draft.nameEn.trim().length > 0,
-  contributionAmount: draft.contributionAmount.trim().length > 0,
-  placeMr: draft.placeMr.trim().length > 0,
-  placeEn: draft.placeEn.trim().length > 0
-});
+const normalizeSpaces = (value: string): string => value.replace(/\s+/g, " ").trim();
 
-const findFirstUnacceptedIndex = (
-  acceptedMap: Record<VoiceCaptureFieldName, boolean>
-): number => {
-  const pending = FIELD_CONFIGS.findIndex((field) => !acceptedMap[field.key]);
-  return pending >= 0 ? pending : FIELD_CONFIGS.length - 1;
+const toAsciiDigits = (value: string): string =>
+  Array.from(value)
+    .map((char) => DEVANAGARI_DIGITS[char] ?? char)
+    .join("");
+
+const titleCase = (value: string): string =>
+  normalizeSpaces(value)
+    .split(" ")
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1).toLowerCase() : part))
+    .join(" ");
+
+const transliterateCached = (value: string): string =>
+  normalizeSpaces(value)
+    .split(" ")
+    .map((token) => TRANSLITERATION_CACHE[token] ?? transliterateMarathiToEnglish(token))
+    .join(" ");
+
+const parseAmountToken = (value: string): number | null => {
+  const normalized = normalizeSpaces(toAsciiDigits(value).replace(/[₹,]/g, " "));
+  const compactNumeric = normalized.replace(/\s+/g, "");
+  if (/^(?:rs|inr)?\d+$/.test(compactNumeric.toLowerCase())) {
+    const parsed = Number.parseInt(compactNumeric.replace(/^(?:rs|inr)/i, ""), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  const lower = normalized.toLowerCase();
+  return AMOUNT_WORDS[lower] ?? null;
+};
+
+const parseEntryText = (text: string, serialNumber: number): ParseResult => {
+  const cleaned = normalizeSpaces(text);
+  const warnings: string[] = [];
+
+  if (!cleaned) {
+    return {
+      draft: createInitialDraft(serialNumber),
+      confidence: 0,
+      warnings: ["Enter or speak one entry before parsing."]
+    };
+  }
+
+  const tokens = cleaned.split(" ");
+  let amountStart = -1;
+  let amountEnd = -1;
+  let amount: number | null = null;
+
+  for (let start = 0; start < tokens.length; start += 1) {
+    for (let end = start; end < Math.min(tokens.length, start + 3); end += 1) {
+      const candidate = tokens.slice(start, end + 1).join(" ");
+      const parsed = parseAmountToken(candidate);
+      if (parsed) {
+        amountStart = start;
+        amountEnd = end;
+        amount = parsed;
+        break;
+      }
+    }
+
+    if (amount) {
+      break;
+    }
+  }
+
+  if (!amount || amountStart < 0) {
+    return {
+      draft: {
+        ...createInitialDraft(serialNumber),
+        nameMr: cleaned
+      },
+      confidence: 0.35,
+      warnings: ["Amount was not detected. Use format: Name Amount Place."]
+    };
+  }
+
+  const nameMr = normalizeSpaces(tokens.slice(0, amountStart).join(" "));
+  const placeMr = normalizeSpaces(tokens.slice(amountEnd + 1).join(" "));
+
+  if (!nameMr) {
+    warnings.push("Name is missing before the amount.");
+  }
+
+  if (!placeMr) {
+    warnings.push("Place is missing after the amount.");
+  }
+
+  return {
+    draft: {
+      serialNumber,
+      nameMr,
+      nameEn: titleCase(transliterateCached(nameMr)),
+      contributionAmount: String(amount),
+      placeMr,
+      placeEn: titleCase(transliterateCached(placeMr))
+    },
+    confidence: warnings.length ? 0.65 : 0.92,
+    warnings
+  };
+};
+
+const formatCurrency = (value: string): string => {
+  const amount = Number.parseInt(value, 10);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return "-";
+  }
+
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0
+  }).format(amount);
 };
 
 export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
   const [draft, setDraft] = useState<DraftForm>(createInitialDraft(nextSerialNumber));
-  const [accepted, setAccepted] = useState<Record<VoiceCaptureFieldName, boolean>>({
-    nameMr: false,
-    nameEn: false,
-    contributionAmount: false,
-    placeMr: false,
-    placeEn: false
-  });
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [entryText, setEntryText] = useState("");
+  const [manualMode, setManualMode] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
-  const [topUpTranscript, setTopUpTranscript] = useState("");
-  const [topUpWarnings, setTopUpWarnings] = useState<string[]>([]);
-  const [topUpError, setTopUpError] = useState<string | null>(null);
-  const [topUpProcessing, setTopUpProcessing] = useState(false);
-  const [requestingTopUpPermission, setRequestingTopUpPermission] = useState(false);
+  const [confidence, setConfidence] = useState<number | null>(null);
 
-  useEffect(() => {
-    const hasUnsavedData =
-      draft.nameMr || draft.nameEn || draft.contributionAmount || draft.placeMr || draft.placeEn;
-    if (!hasUnsavedData) {
-      setDraft(createInitialDraft(nextSerialNumber));
-    }
-  }, [nextSerialNumber, draft.contributionAmount, draft.nameEn, draft.nameMr, draft.placeEn, draft.placeMr]);
-
-  const currentFieldConfig = FIELD_CONFIGS[currentIndex];
-
-  const topUpSpeech = useSpeechRecognition({
-    lang: "hi-IN",
-    onTranscript: async (transcript: string) => {
-      setTopUpTranscript(transcript);
-      setTopUpWarnings([]);
-      setTopUpError(null);
-      setTopUpProcessing(true);
-      setFormError(null);
-      setDuplicateWarning(null);
-
-      try {
-        const contributionAmount = Number.parseInt(draft.contributionAmount, 10);
-        const result = await processVoiceTopUp({
-          transcript,
-          currentDraft: {
-            serialNumber: draft.serialNumber,
-            nameMr: draft.nameMr,
-            nameEn: draft.nameEn,
-            contributionAmount:
-              Number.isFinite(contributionAmount) && contributionAmount > 0
-                ? contributionAmount
-                : null,
-            placeMr: draft.placeMr,
-            placeEn: draft.placeEn
-          }
-        });
-
-        const nextDraft: DraftForm = {
-          serialNumber: draft.serialNumber,
-          nameMr: result.nameMr || draft.nameMr,
-          nameEn: result.nameEn || draft.nameEn,
-          contributionAmount:
-            result.contributionAmount !== null && result.contributionAmount !== undefined
-              ? String(result.contributionAmount)
-              : draft.contributionAmount,
-          placeMr: result.placeMr || draft.placeMr,
-          placeEn: result.placeEn || draft.placeEn
-        };
-
-        const nextAccepted = deriveAcceptedFromDraft(nextDraft);
-        setDraft(nextDraft);
-        setAccepted(nextAccepted);
-        setCurrentIndex(findFirstUnacceptedIndex(nextAccepted));
-        setTopUpWarnings(result.warnings);
-      } catch (error: unknown) {
-        const message =
-          typeof error === "object" && error !== null && "message" in error
-            ? String(error.message)
-            : "Could not process top-up voice input. Try again or continue manual entry.";
-        setTopUpError(message);
-      } finally {
-        setTopUpProcessing(false);
-      }
-    }
-  });
-
-  const progress = useMemo(() => {
-    const doneCount = FIELD_CONFIGS.filter((field) => accepted[field.key]).length;
-    return {
-      doneCount,
-      total: FIELD_CONFIGS.length
-    };
-  }, [accepted]);
-
-  const updateField = (field: VoiceCaptureFieldName, value: string) => {
+  const applyParseResult = (result: ParseResult) => {
     setDraft((prev) => ({
       ...prev,
-      [field]: value
+      ...result.draft
     }));
-    setAccepted((prev) => ({
-      ...prev,
-      [field]: false
-    }));
-    setFormError(null);
+    setConfidence(result.confidence);
+    setWarnings(result.warnings);
     setDuplicateWarning(null);
+    setStatus(result.warnings.length ? "Please verify and edit before saving." : "Parsed locally. Verify and save.");
   };
 
-  const onAcceptField = () => {
-    const value = draft[currentFieldConfig.key];
-    if (!value.trim()) {
-      setFormError(`${currentFieldConfig.label} is required before accepting.`);
-      return;
+  const speech = useSpeechRecognition({
+    lang: "mr-IN",
+    onTranscript: (transcript) => {
+      setEntryText(transcript);
+      applyParseResult(parseEntryText(transcript, nextSerialNumber));
     }
+  });
 
-    setAccepted((prev) => ({
-      ...prev,
-      [currentFieldConfig.key]: true
-    }));
-    setFormError(null);
-
-    if (currentIndex < FIELD_CONFIGS.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    }
-  };
-
-  const hasRequiredDraftFields = FIELD_CONFIGS.every((field) =>
-    draft[field.key].trim().length > 0
+  const hasPreview = useMemo(
+    () =>
+      Boolean(
+        draft.nameMr ||
+          draft.nameEn ||
+          draft.contributionAmount ||
+          draft.placeMr ||
+          draft.placeEn
+      ),
+    [draft]
   );
 
-  const handleSave = async () => {
+  const missingFields = useMemo(() => {
+    const missing: string[] = [];
+    if (!draft.nameMr.trim()) missing.push("Name (MR)");
+    if (!draft.nameEn.trim()) missing.push("Name (EN)");
+    if (!draft.contributionAmount.trim()) missing.push("Amount");
+    if (!draft.placeMr.trim()) missing.push("Place (MR)");
+    if (!draft.placeEn.trim()) missing.push("Place (EN)");
+    return missing;
+  }, [draft]);
+
+  const clearDraft = () => {
+    setDraft(createInitialDraft(nextSerialNumber));
+    setEntryText("");
+    setWarnings([]);
+    setDuplicateWarning(null);
+    setConfidence(null);
+    setStatus(null);
+  };
+
+  const parseManualEntry = () => {
+    applyParseResult(parseEntryText(entryText, nextSerialNumber));
+    setManualMode(true);
+  };
+
+  const saveRow = async () => {
     setSaving(true);
-    setFormError(null);
+    setStatus(null);
     setDuplicateWarning(null);
 
-    const contributionAmount = Number.parseInt(draft.contributionAmount, 10);
+    const amount = Number.parseInt(draft.contributionAmount, 10);
 
-    if (!hasRequiredDraftFields) {
+    if (missingFields.length > 0) {
       setSaving(false);
-      setFormError("Complete all row fields before saving.");
+      setStatus(`Complete required fields: ${missingFields.join(", ")}.`);
       return;
     }
 
-    if (!Number.isFinite(contributionAmount) || contributionAmount <= 0) {
+    if (!Number.isFinite(amount) || amount <= 0) {
       setSaving(false);
-      setFormError("Contribution amount must be a valid positive number.");
+      setStatus("Amount must be a valid positive number.");
       return;
     }
 
     try {
       const duplicateResult = await checkDuplicate({
         nameMr: draft.nameMr,
-        contributionAmount,
+        contributionAmount: amount,
         placeMr: draft.placeMr
       });
 
       if (duplicateResult.isDuplicate) {
         setDuplicateWarning(
-          `Duplicate detected (Name: ${duplicateResult.matchedRow?.nameMr}, Amount: ${duplicateResult.matchedRow?.contributionAmount}, Place: ${duplicateResult.matchedRow?.placeMr}). Save is blocked.`
+          `Possible duplicate found with serial ${duplicateResult.matchedRow?.serialNumber ?? "unknown"}.`
         );
         return;
       }
@@ -264,227 +302,231 @@ export const RowCaptureWizard = ({ nextSerialNumber, onRowCreated }: Props) => {
       const created = await createRow({
         nameMr: draft.nameMr,
         nameEn: draft.nameEn,
-        contributionAmount,
+        contributionAmount: amount,
         placeMr: draft.placeMr,
         placeEn: draft.placeEn
       });
 
       onRowCreated(created);
       setDraft(createInitialDraft(created.serialNumber + 1));
-      setAccepted({
-        nameMr: false,
-        nameEn: false,
-        contributionAmount: false,
-        placeMr: false,
-        placeEn: false
-      });
-      setCurrentIndex(0);
+      setEntryText("");
+      setWarnings([]);
+      setConfidence(null);
+      setStatus(`Saved row #${created.serialNumber}.`);
     } catch (error: unknown) {
       if (error instanceof ApiClientError && error.code === "DUPLICATE_ROW") {
         const matchedRow = (error.details as { matchedRow?: ContributionRow } | undefined)
           ?.matchedRow;
-
-        if (matchedRow) {
-          setDuplicateWarning(
-            `Duplicate detected. This matches row #${matchedRow.serialNumber} (${matchedRow.nameMr}, ${matchedRow.contributionAmount}, ${matchedRow.placeMr}).`
-          );
-        } else {
-          setDuplicateWarning("Duplicate detected. Save is blocked.");
-        }
+        setDuplicateWarning(
+          `Possible duplicate found with serial ${matchedRow?.serialNumber ?? "unknown"}.`
+        );
         return;
       }
 
-      const message =
-        typeof error === "object" && error !== null && "message" in error
-          ? String(error.message)
-          : "Failed to save row";
-      setFormError(message);
+      setStatus("Failed to save row. Please verify fields and retry.");
     } finally {
       setSaving(false);
     }
   };
 
+  const updateDraft = (field: keyof DraftForm, value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      [field]: value,
+      ...(field === "nameMr" ? { nameEn: titleCase(transliterateCached(value)) } : {}),
+      ...(field === "placeMr" ? { placeEn: titleCase(transliterateCached(value)) } : {})
+    }));
+    setStatus(null);
+    setDuplicateWarning(null);
+  };
+
   return (
-    <Card
-      title="Add New Row"
-      subtitle="Capture one field at a time: Listen -> Verify -> Accept -> Next"
-    >
-      <div className="mb-4 flex items-center justify-between">
-        <Badge variant="success">Serial Number: {draft.serialNumber}</Badge>
-        <Badge>{`Progress: ${progress.doneCount}/${progress.total}`}</Badge>
-      </div>
+    <div className="space-y-3">
+      <section className="rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-50 text-blue-700">
+                <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" stroke="currentColor" strokeWidth="2" />
+                  <path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v3M8 21h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <h2 className="text-base font-bold text-slate-950">Quick Entry</h2>
+              <p className="text-sm text-slate-500">Speak: Name + Amount + Place</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={speech.isListening ? speech.stopListening : speech.startListening}
+              disabled={!speech.isSupported || speech.permissionState === "denied"}
+              className="min-w-[130px]"
+            >
+              {speech.isListening ? "Stop Voice" : "Start Voice"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setManualMode((value) => !value)}
+            >
+              Manual Entry
+            </Button>
+            <Button type="button" variant="danger" onClick={clearDraft}>
+              Clear
+            </Button>
+          </div>
+        </div>
 
-      <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <p className="text-sm font-semibold text-slate-800">Top-up Voice (Name + Amount + Location)</p>
-        <p className="mt-1 text-xs text-slate-600">
-          Speak one phrase in order: Name, Amount, Location. Example: Krishna Ravale 500 Nevale.
-        </p>
+        <div className="mt-4 rounded-lg border border-blue-100 bg-gradient-to-r from-blue-50 to-white p-3">
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="flex items-center gap-3">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm">
+                <svg aria-hidden="true" className="h-6 w-6" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" stroke="currentColor" strokeWidth="2" />
+                  <path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex h-9 items-end gap-1 text-blue-600" aria-hidden="true">
+                  {Array.from({ length: 36 }).map((_, index) => (
+                    <span
+                      key={index}
+                      className={`w-0.5 rounded-full bg-current ${speech.isListening ? "animate-pulse" : ""}`}
+                      style={{ height: `${10 + ((index * 7) % 24)}px` }}
+                    />
+                  ))}
+                </div>
+                <p className="mt-1 text-sm font-semibold text-emerald-700">
+                  {speech.isListening ? "Listening..." : "Ready for one full entry"}
+                </p>
+                <p className="text-xs text-slate-600">Example: कृष्णा रावळे ५०० नेवाळे</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              Say once: नाव + रक्कम + ठिकाण
+            </p>
+          </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            type="button"
-            onClick={topUpSpeech.isListening ? topUpSpeech.stopListening : topUpSpeech.startListening}
-            disabled={
-              !topUpSpeech.isSupported ||
-              topUpProcessing ||
-              requestingTopUpPermission ||
-              topUpSpeech.permissionState === "denied"
-            }
-          >
-            {topUpSpeech.isListening ? "Stop Top-up Voice" : "Start Top-up Voice"}
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={async () => {
-              setRequestingTopUpPermission(true);
-              try {
-                await topUpSpeech.requestPermission();
-              } finally {
-                setRequestingTopUpPermission(false);
-              }
-            }}
-            disabled={
-              !topUpSpeech.isMicrophoneSupported ||
-              requestingTopUpPermission ||
-              topUpProcessing
-            }
-          >
-            {requestingTopUpPermission ? "Requesting access..." : "Enable microphone access"}
+          {manualMode ? (
+            <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto]">
+              <Input
+                aria-label="Manual quick entry"
+                value={entryText}
+                onChange={(event) => setEntryText(event.target.value)}
+                placeholder="कृष्णा रावळे ५०० नेवाळे"
+              />
+              <Button type="button" onClick={parseManualEntry}>
+                Parse Entry
+              </Button>
+            </div>
+          ) : null}
+
+          {!speech.isSupported ? (
+            <p className="mt-2 text-xs text-amber-700">
+              Speech-to-text is not supported in this browser. Use Chrome or manual entry.
+            </p>
+          ) : null}
+          {speech.error ? <p className="mt-2 text-xs text-rose-600">{speech.error}</p> : null}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-slate-950">Preview & Verify</h2>
+            <p className="text-sm text-slate-500">Please verify the captured details</p>
+          </div>
+          <Button type="button" variant="ghost" onClick={() => setManualMode(true)}>
+            Edit
           </Button>
         </div>
 
-        {!topUpSpeech.isSupported ? (
-          <p className="mt-2 text-xs text-amber-700">
-            Speech-to-text is not supported in this browser. Use Chrome or Edge for top-up voice.
+        <div className="mt-3 grid gap-3 xl:grid-cols-[1fr_1fr_1fr_auto]">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <label className="text-xs font-semibold text-slate-600">Name (MR)</label>
+            <Input
+              aria-label="Name Marathi"
+              value={draft.nameMr}
+              onChange={(event) => updateDraft("nameMr", event.target.value)}
+              placeholder="कृष्णा रावळे"
+              className="mt-1 border-0 bg-transparent px-0 text-base font-semibold focus:ring-0"
+            />
+            <label className="mt-2 block text-xs font-semibold text-slate-600">Name (EN)</label>
+            <Input
+              aria-label="Name English"
+              value={draft.nameEn}
+              onChange={(event) => updateDraft("nameEn", event.target.value)}
+              placeholder="Krishna Ravale"
+              className="mt-1 border-0 bg-transparent px-0 focus:ring-0"
+            />
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <label className="text-xs font-semibold text-slate-600">Amount</label>
+            <Input
+              aria-label="Contribution amount"
+              value={draft.contributionAmount}
+              onChange={(event) => updateDraft("contributionAmount", event.target.value)}
+              placeholder="500"
+              inputMode="numeric"
+              className="mt-1 border-0 bg-transparent px-0 text-lg font-bold focus:ring-0"
+            />
+            <p className="mt-3 text-sm text-slate-500">{formatCurrency(draft.contributionAmount)}</p>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <label className="text-xs font-semibold text-slate-600">Place (MR)</label>
+            <Input
+              aria-label="Place Marathi"
+              value={draft.placeMr}
+              onChange={(event) => updateDraft("placeMr", event.target.value)}
+              placeholder="नेवाळे"
+              className="mt-1 border-0 bg-transparent px-0 text-base font-semibold focus:ring-0"
+            />
+            <label className="mt-2 block text-xs font-semibold text-slate-600">Place (EN)</label>
+            <Input
+              aria-label="Place English"
+              value={draft.placeEn}
+              onChange={(event) => updateDraft("placeEn", event.target.value)}
+              placeholder="Nevale"
+              className="mt-1 border-0 bg-transparent px-0 focus:ring-0"
+            />
+          </div>
+
+          <div className="flex min-w-[190px] flex-col justify-center gap-2 border-slate-200 xl:border-l xl:pl-6">
+            <Button type="button" onClick={saveRow} disabled={saving || !hasPreview}>
+              {saving ? "Saving..." : "Save Row"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={clearDraft}>
+              Clear
+            </Button>
+          </div>
+        </div>
+
+        {confidence !== null ? (
+          <p className="mt-3 text-xs text-slate-500">
+            Parse confidence: {Math.round(confidence * 100)}%
           </p>
         ) : null}
-        {!topUpSpeech.isMicrophoneSupported ? (
-          <p className="mt-2 text-xs text-amber-700">
-            Microphone access is unavailable on this page or device.
-          </p>
-        ) : null}
-        {topUpSpeech.isListening ? (
-          <p className="mt-2 text-xs font-medium text-brand-700">Listening for full row...</p>
-        ) : null}
-        {topUpTranscript ? (
-          <p className="mt-2 text-xs text-slate-500">
-            Last top-up transcript: <span className="font-medium">{topUpTranscript}</span>
-          </p>
-        ) : null}
-        {topUpProcessing ? (
-          <p className="mt-2 text-xs text-brand-700">Applying top-up voice to row fields...</p>
-        ) : null}
-        {topUpWarnings.length > 0 ? (
+        {warnings.length > 0 ? (
           <ul className="mt-2 space-y-1 text-xs text-amber-700">
-            {topUpWarnings.map((warning) => (
+            {warnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
         ) : null}
-        {topUpSpeech.error || topUpError ? (
-          <p className="mt-2 text-xs text-rose-600">{topUpSpeech.error ?? topUpError}</p>
+        {duplicateWarning ? (
+          <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {duplicateWarning}
+          </p>
         ) : null}
-      </div>
-
-      <div className="space-y-4">
-        <VoiceFieldInput
-          field={currentFieldConfig.key}
-          label={currentFieldConfig.label}
-          prompt={currentFieldConfig.prompt}
-          lang={currentFieldConfig.lang}
-          value={draft[currentFieldConfig.key]}
-          currentDraft={{
-            serialNumber: draft.serialNumber,
-            nameMr: draft.nameMr,
-            nameEn: draft.nameEn,
-            contributionAmount:
-              Number.parseInt(draft.contributionAmount, 10) > 0
-                ? Number.parseInt(draft.contributionAmount, 10)
-                : null,
-            placeMr: draft.placeMr,
-            placeEn: draft.placeEn
-          }}
-          placeholder={currentFieldConfig.placeholder}
-          onValueChange={(value) => updateField(currentFieldConfig.key, value)}
-          onAutoFill={(updates) => {
-            if (updates.nameEn) {
-              setDraft((prev) => ({ ...prev, nameEn: updates.nameEn ?? prev.nameEn }));
-            }
-            if (updates.placeEn) {
-              setDraft((prev) => ({ ...prev, placeEn: updates.placeEn ?? prev.placeEn }));
-            }
-          }}
-        />
-
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={onAcceptField}>
-            Accept
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setCurrentIndex((prev) => Math.max(prev - 1, 0))}
-            disabled={currentIndex === 0}
-          >
-            Previous Field
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() =>
-              setCurrentIndex((prev) => Math.min(prev + 1, FIELD_CONFIGS.length - 1))
-            }
-            disabled={currentIndex === FIELD_CONFIGS.length - 1}
-          >
-            Next Field
-          </Button>
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
-        <h3 className="text-sm font-semibold text-slate-800">Review Before Save</h3>
-        <div className="mt-2 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
-          <p>
-            <span className="font-medium">Name (MR): </span>
-            {draft.nameMr || "-"}
+        {status ? (
+          <p className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            {status}
           </p>
-          <p>
-            <span className="font-medium">Name (EN): </span>
-            {draft.nameEn || "-"}
-          </p>
-          <p>
-            <span className="font-medium">Amount: </span>
-            {draft.contributionAmount || "-"}
-          </p>
-          <p>
-            <span className="font-medium">Place (MR): </span>
-            {draft.placeMr || "-"}
-          </p>
-          <p>
-            <span className="font-medium">Place (EN): </span>
-            {draft.placeEn || "-"}
-          </p>
-        </div>
-      </div>
-
-      {duplicateWarning ? (
-        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          {duplicateWarning}
-        </p>
-      ) : null}
-
-      {formError ? (
-        <p className="mt-3 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {formError}
-        </p>
-      ) : null}
-
-      <div className="mt-4 flex gap-2">
-        <Button type="button" onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save Row"}
-        </Button>
-      </div>
-    </Card>
+        ) : null}
+      </section>
+    </div>
   );
 };

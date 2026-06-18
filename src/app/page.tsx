@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContributionRow } from "@/lib/contracts/row";
 import { deleteRow, fetchRows } from "@/lib/utils/apiClient";
 import { RowCaptureWizard } from "@/components/row-form/RowCaptureWizard";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 
-type DuplicateFilter = "all" | "duplicate" | "unique";
+type DuplicateFilter = "all" | "duplicate" | "possible" | "unique";
 
 const buildExportUrl = (
   format: "csv" | "xlsx" | "pdf",
@@ -32,9 +32,8 @@ const formatAmount = (value: number): string =>
 const normalize = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, " ");
 
 const DEFAULT_TABLE_COLUMNS: RowsTableColumn[] = [
-  { id: "serialNumber", label: "Serial", kind: "field", accessor: "serialNumber", width: 120 },
-  { id: "nameMr", label: "Name (MR)", kind: "field", accessor: "nameMr", width: 220 },
-  { id: "nameEn", label: "Name (EN)", kind: "field", accessor: "nameEn", width: 220 },
+  { id: "serialNumber", label: "#", kind: "field", accessor: "serialNumber", width: 80 },
+  { id: "name", label: "Name (MR / EN)", kind: "name", width: 300 },
   {
     id: "contributionAmount",
     label: "Amount",
@@ -42,10 +41,8 @@ const DEFAULT_TABLE_COLUMNS: RowsTableColumn[] = [
     accessor: "contributionAmount",
     width: 140
   },
-  { id: "placeMr", label: "Place (MR)", kind: "field", accessor: "placeMr", width: 180 },
-  { id: "placeEn", label: "Place (EN)", kind: "field", accessor: "placeEn", width: 180 },
-  { id: "duplicate", label: "Duplicate", kind: "duplicate", width: 180 },
-  { id: "actions", label: "Actions", kind: "actions", width: 210 }
+  { id: "place", label: "Place (MR / EN)", kind: "place", width: 260 },
+  { id: "actions", label: "Actions", kind: "actions", width: 190 }
 ];
 
 const createCustomColumn = (label: string): RowsTableColumn => ({
@@ -56,6 +53,9 @@ const createCustomColumn = (label: string): RowsTableColumn => ({
 });
 
 export default function HomePage() {
+  const entrySectionRef = useRef<HTMLDivElement | null>(null);
+  const recordsSectionRef = useRef<HTMLElement | null>(null);
+  const reportsSectionRef = useRef<HTMLElement | null>(null);
   const [rows, setRows] = useState<ContributionRow[]>([]);
   const [nextSerialNumber, setNextSerialNumber] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -65,6 +65,10 @@ export default function HomePage() {
   const [duplicateFilter, setDuplicateFilter] = useState<DuplicateFilter>("all");
   const [editingRow, setEditingRow] = useState<ContributionRow | null>(null);
   const [tableColumns, setTableColumns] = useState<RowsTableColumn[]>(DEFAULT_TABLE_COLUMNS);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+  const [darkTheme, setDarkTheme] = useState(false);
+  const [activeSection, setActiveSection] = useState("Entry");
   const [selectedColumnId, setSelectedColumnId] = useState<string | null>(
     DEFAULT_TABLE_COLUMNS[0]?.id ?? null
   );
@@ -158,7 +162,7 @@ export default function HomePage() {
     return rows.filter((row) => {
       const isDuplicate = duplicateRowIds.has(row.id);
 
-      if (duplicateFilter === "duplicate" && !isDuplicate) {
+      if ((duplicateFilter === "duplicate" || duplicateFilter === "possible") && !isDuplicate) {
         return false;
       }
 
@@ -268,154 +272,245 @@ export default function HomePage() {
     );
   }, []);
 
+  const scrollToSection = (section: "Entry" | "Records" | "Reports") => {
+    setActiveSection(section);
+    const target =
+      section === "Entry"
+        ? entrySectionRef.current
+        : section === "Records"
+          ? recordsSectionRef.current
+          : reportsSectionRef.current;
+
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const handleSideMenuClick = (item: string) => {
+    if (item === "Entry" || item === "Records" || item === "Reports") {
+      scrollToSection(item);
+      setExportMenuOpen(false);
+      setColumnsMenuOpen(false);
+      return;
+    }
+
+    if (item === "Export") {
+      scrollToSection("Records");
+      setExportMenuOpen(true);
+      setColumnsMenuOpen(false);
+      setActiveSection("Export");
+      return;
+    }
+
+    if (item === "Settings") {
+      scrollToSection("Records");
+      setColumnsMenuOpen(true);
+      setExportMenuOpen(false);
+      setActiveSection("Settings");
+      return;
+    }
+
+    if (item === "Theme") {
+      setDarkTheme((value) => !value);
+      setActiveSection("Theme");
+    }
+  };
+
   return (
-    <main className="mx-auto max-w-7xl space-y-4 p-4 pb-8 md:p-6">
-      <header className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
-        <h1 className="text-2xl font-bold text-slate-900">
-          Voice-Based Structured Data Entry (Marathi + English)
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Capture each field using microphone, verify text visually, edit if needed, then save.
-        </p>
+    <div className={`min-h-screen ${darkTheme ? "bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-950"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-30 hidden w-28 border-r p-3 shadow-sm lg:block ${
+        darkTheme ? "border-slate-800 bg-slate-900/95" : "border-slate-200 bg-white/95"
+      }`}>
+        <div className="flex h-full flex-col items-center justify-between">
+          <div className="w-full space-y-5">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm">
+              <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" stroke="currentColor" strokeWidth="2" />
+                <path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </div>
+            {["Entry", "Records", "Reports", "Export", "Settings", darkTheme ? "Light" : "Theme"].map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => handleSideMenuClick(item === "Light" ? "Theme" : item)}
+                className={`flex w-full flex-col items-center gap-1 rounded-lg px-2 py-3 text-xs font-semibold ${
+                  activeSection === item || (activeSection === "Theme" && item === "Light")
+                    ? "bg-blue-50 text-blue-700"
+                    : darkTheme
+                      ? "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
+                }`}
+              >
+                <span className="h-2 w-2 rounded-full bg-current" aria-hidden="true" />
+                {item}
+              </button>
+            ))}
+          </div>
+          <div className={`w-full rounded-lg border p-2 text-center text-xs font-semibold ${
+            darkTheme
+              ? "border-slate-700 bg-slate-800 text-slate-100"
+              : "border-slate-200 bg-white text-slate-600"
+          }`}>
+            Menu
+          </div>
+        </div>
+      </aside>
+
+      <main className="mx-auto max-w-[1440px] space-y-3 p-3 pb-8 md:p-5 lg:ml-28">
+      <header ref={reportsSectionRef} className="scroll-mt-4 grid gap-3 lg:grid-cols-[1fr_auto_auto] lg:items-center">
+        <div>
+          <h1 className="text-2xl font-black tracking-normal text-slate-950">
+            Voice-Based Structured Data Entry
+          </h1>
+          <p className="mt-1 text-sm font-medium text-slate-600">Speak once. Verify. Save.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:min-w-[360px]">
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-medium text-slate-500">Total Records</p>
+            <p className="mt-1 text-xl font-bold text-slate-950">{rows.length}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-xs font-medium text-slate-500">Overall Total</p>
+            <p className="mt-1 text-xl font-bold text-slate-950">{formatAmount(overallTotal)}</p>
+          </div>
+        </div>
+        <Button variant="secondary" className="h-11 justify-self-start lg:justify-self-end">
+          How it works?
+        </Button>
       </header>
 
-      <RowCaptureWizard nextSerialNumber={nextSerialNumber} onRowCreated={handleRowCreated} />
+      <div ref={entrySectionRef} className="scroll-mt-4">
+        <RowCaptureWizard nextSerialNumber={nextSerialNumber} onRowCreated={handleRowCreated} />
+      </div>
 
-      <Card title="Saved Rows" subtitle={summaryText}>
-        <div className="mb-4 grid gap-2 lg:grid-cols-[1fr_minmax(220px,1fr)_auto_auto_auto_auto]">
-          <div className="min-w-[260px] flex-1">
-            <Input
-              label="Search / Filter"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by serial, name, place, or amount"
-            />
-          </div>
+      <Card
+        title="Saved Entries"
+        subtitle={`${visibleRows.length} records - ${formatAmount(filteredTotal)} total`}
+        className="scroll-mt-4"
+      >
+        <section ref={recordsSectionRef} className="border-b border-slate-200 pb-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div className="min-w-[260px] flex-1 md:max-w-sm">
+              <Input
+                aria-label="Search saved entries"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search..."
+              />
+            </div>
 
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-700" htmlFor="duplicate-filter">
-              Duplicate Filter
-            </label>
             <select
-              id="duplicate-filter"
+              aria-label="Duplicate filter"
               value={duplicateFilter}
               onChange={(event) => setDuplicateFilter(event.target.value as DuplicateFilter)}
-              className="h-10 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
             >
               <option value="all">All rows</option>
-              <option value="duplicate">Potential duplicates</option>
-              <option value="unique">Unique rows</option>
+              <option value="unique">Unique only</option>
+              <option value="duplicate">Duplicates only</option>
+              <option value="possible">Possible duplicates</option>
             </select>
-          </div>
 
-          <div className="min-w-[220px]">
-            <Input
-              label="Export File Name"
-              value={exportFileName}
-              onChange={(event) => setExportFileName(event.target.value)}
-              placeholder="aaherpatti_contributions"
-            />
-          </div>
+            <div className="relative">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setExportMenuOpen((value) => !value);
+                  setColumnsMenuOpen(false);
+                }}
+              >
+                Export
+              </Button>
+              {exportMenuOpen ? (
+                <div className="absolute right-0 z-20 mt-2 w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                  {(["csv", "xlsx", "pdf"] as const).map((format) => (
+                    <button
+                      key={format}
+                      type="button"
+                      className="block w-full rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      onClick={() => {
+                        setExportMenuOpen(false);
+                        window.open(buildExportUrl(format, search, exportFileName), "_blank");
+                      }}
+                    >
+                      Export {format.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
-          <Button
-            variant="secondary"
-            onClick={() => window.open(buildExportUrl("csv", search, exportFileName), "_blank")}
-          >
-            Export CSV
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => window.open(buildExportUrl("xlsx", search, exportFileName), "_blank")}
-          >
-            Export XLSX
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => window.open(buildExportUrl("pdf", search, exportFileName), "_blank")}
-          >
-            Export PDF
-          </Button>
-        </div>
-
-        <div className="mb-4 grid gap-2 lg:grid-cols-[minmax(220px,1fr)_auto_auto_auto_auto]">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-700" htmlFor="column-select">
-              Selected Column
-            </label>
-            <select
-              id="column-select"
-              value={selectedColumnId ?? ""}
-              onChange={(event) => setSelectedColumnId(event.target.value)}
-              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-            >
-              {tableColumns.map((column) => (
-                <option key={column.id} value={column.id}>
-                  {column.label}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setColumnsMenuOpen((value) => !value);
+                  setExportMenuOpen(false);
+                }}
+              >
+                Columns
+              </Button>
+              {columnsMenuOpen ? (
+                <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                  <label className="mb-2 block text-xs font-semibold text-slate-600" htmlFor="column-select">
+                    Select Columns
+                  </label>
+                  <select
+                    id="column-select"
+                    value={selectedColumnId ?? ""}
+                    onChange={(event) => setSelectedColumnId(event.target.value)}
+                    className="mb-2 h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                  >
+                    {tableColumns.map((column) => (
+                      <option key={column.id} value={column.id}>
+                        {column.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => addColumnRelativeToSelection("before")}>
+                    Add Before
+                  </button>
+                  <button className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => addColumnRelativeToSelection("after")}>
+                    Add After
+                  </button>
+                  <button className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={renameSelectedColumn}>
+                    Rename Column
+                  </button>
+                  <button className="block w-full rounded-md px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50" onClick={deleteSelectedColumn} disabled={tableColumns.length <= 1}>
+                    Delete Column
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
-          <Button variant="secondary" onClick={() => addColumnRelativeToSelection("before")}>
-            Add Before
-          </Button>
-          <Button variant="secondary" onClick={() => addColumnRelativeToSelection("after")}>
-            Add After
-          </Button>
-          <Button variant="secondary" onClick={renameSelectedColumn}>
-            Edit Title
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={deleteSelectedColumn}
-            disabled={tableColumns.length <= 1}
-          >
-            Delete Column
-          </Button>
-        </div>
-        <p className="mb-4 text-xs text-slate-500">
-          Tip: click any table header to select it, drag the header edge to resize, and use horizontal
-          scroll when columns exceed screen width.
-        </p>
-
-        <div className="mb-4 grid gap-2 sm:grid-cols-3">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Record Count</p>
-            <p className="font-semibold text-slate-900">
-              {visibleRows.length} / {rows.length}
-            </p>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Filtered Total</p>
-            <p className="font-semibold text-slate-900">{formatAmount(filteredTotal)}</p>
-          </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Overall Total</p>
-            <p className="font-semibold text-slate-900">{formatAmount(overallTotal)}</p>
-          </div>
-        </div>
+        </section>
 
         {loading ? <p className="text-sm text-slate-600">Loading rows...</p> : null}
         {error ? (
-          <p className="mb-3 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <p className="my-3 rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {error}
           </p>
         ) : null}
 
-        <RowsTable
-          rows={visibleRows}
-          columns={tableColumns}
-          selectedColumnId={selectedColumnId}
-          duplicateRowIds={duplicateRowIds}
-          onSelectColumn={setSelectedColumnId}
-          onResizeColumn={resizeColumn}
-          onEdit={setEditingRow}
-          onDelete={handleDelete}
-          emptyMessage={
-            rows.length === 0
-              ? "No rows available yet. Add your first row above."
-              : "No rows match your current filters."
-          }
-        />
+        <div className="pt-4">
+          <RowsTable
+            rows={visibleRows}
+            columns={tableColumns}
+            selectedColumnId={selectedColumnId}
+            duplicateRowIds={duplicateRowIds}
+            onSelectColumn={setSelectedColumnId}
+            onResizeColumn={resizeColumn}
+            onEdit={setEditingRow}
+            onDelete={handleDelete}
+            emptyMessage={
+              rows.length === 0
+                ? "No rows available yet. Add your first row above."
+                : "No rows match your current filters."
+            }
+          />
+          <p className="mt-3 text-xs text-slate-500">{summaryText}</p>
+        </div>
       </Card>
 
       <RowEditDialog
@@ -423,6 +518,7 @@ export default function HomePage() {
         onClose={() => setEditingRow(null)}
         onRowUpdated={handleRowUpdated}
       />
-    </main>
+      </main>
+    </div>
   );
 }

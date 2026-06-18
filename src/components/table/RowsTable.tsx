@@ -16,7 +16,7 @@ export type RowsTableColumn = {
   id: string;
   label: string;
   width: number;
-  kind: "field" | "duplicate" | "actions" | "custom";
+  kind: "field" | "name" | "place" | "actions" | "custom";
   accessor?: RowFieldAccessor;
 };
 
@@ -140,10 +140,20 @@ export const RowsTable = ({
                         className="px-3 py-2 align-middle"
                       >
                         <div className="flex gap-2">
-                          <Button variant="secondary" onClick={() => onEdit(row)}>
+                          <Button
+                            aria-label={`Edit row ${row.serialNumber}`}
+                            variant="secondary"
+                            className="px-2 py-1"
+                            onClick={() => onEdit(row)}
+                          >
                             Edit
                           </Button>
-                          <Button variant="danger" onClick={() => onDelete(row)}>
+                          <Button
+                            aria-label={`Delete row ${row.serialNumber}`}
+                            variant="danger"
+                            className="px-2 py-1"
+                            onClick={() => onDelete(row)}
+                          >
                             Delete
                           </Button>
                         </div>
@@ -151,22 +161,35 @@ export const RowsTable = ({
                     );
                   }
 
-                  if (column.kind === "duplicate") {
+                  if (column.kind === "name") {
                     return (
                       <td
                         key={`${row.id}-${column.id}`}
                         style={{ width: column.width, minWidth: column.width, maxWidth: column.width }}
                         className="px-3 py-2 align-middle"
                       >
+                        <div className="font-semibold text-slate-950">{row.nameMr}</div>
+                        <div className="text-xs text-slate-500">{row.nameEn}</div>
                         {isDuplicate ? (
-                          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
-                            Potential duplicate
-                          </span>
-                        ) : (
-                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
-                            Unique
-                          </span>
-                        )}
+                          <div className="mt-1">
+                            <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                              Possible duplicate
+                            </span>
+                          </div>
+                        ) : null}
+                      </td>
+                    );
+                  }
+
+                  if (column.kind === "place") {
+                    return (
+                      <td
+                        key={`${row.id}-${column.id}`}
+                        style={{ width: column.width, minWidth: column.width, maxWidth: column.width }}
+                        className="px-3 py-2 align-middle"
+                      >
+                        <div className="font-semibold text-slate-950">{row.placeMr}</div>
+                        <div className="text-xs text-slate-500">{row.placeEn}</div>
                       </td>
                     );
                   }
@@ -189,7 +212,7 @@ export const RowsTable = ({
                     <td
                       key={`${row.id}-${column.id}`}
                       style={{ width: column.width, minWidth: column.width, maxWidth: column.width }}
-                      className={`truncate px-3 py-2 ${
+                      className={`truncate px-3 py-2 align-middle ${
                         column.accessor === "serialNumber" ? "font-semibold text-slate-900" : ""
                       }`}
                     >
